@@ -293,6 +293,7 @@ def run_all_benchmarks(
     bm_max_secs=None,
     bm_max_trials=None,
     bm_estimate_time=False,
+    data_path=None
 ):
     if binary_path:
         binary_path = _normalize_path(binary_path)
@@ -326,6 +327,11 @@ def run_all_benchmarks(
 
         if bm_estimate_time:
             run_command.append("--bm_estimate_time")
+
+        # only the TPCH benchmark executables support --data_path (for now)
+        if re.search("^velox_tpch_benchmark$", binary_path.name) or re.search("^velox_cudf_tpch_benchmark$", binary_path.name): 
+            if data_path:
+                run_command.extend(["--data_path", str(data_path)])
 
         try:
             print(run_command)
@@ -408,6 +414,7 @@ def run(args):
         "bm_max_secs": args.bm_max_secs,
         "bm_max_trials": args.bm_max_trials,
         "bm_estimate_time": args.bm_estimate_time,
+        "data_path": args.data_path
     }
 
     # In case we only want to rerun failed benchmarks from rerun_json_input.
@@ -451,6 +458,11 @@ def parse_args():
         default=None,
         help="Directory where output json files will be written to. "
         "By default generate a temporary directory.",
+    )
+    parser_run.add_argument(
+        "--data_path",
+        default=None,
+        help="Directory where TPCH Parquet files can be found."
     )
     parser_run.add_argument(
         "--binary_filter",
