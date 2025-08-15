@@ -44,9 +44,9 @@ folly::json::serialization_opts createSerializationOpts(
   return opts;
 }
 
-folly::json::parse_opts createParseOpts(
+folly::json::serialization_opts createParseOpts(
     const PlanNodeJsonSerializer::DeserializationOptions& options) {
-  folly::json::parse_opts opts;
+  folly::json::serialization_opts opts;
   opts.allow_trailing_comma = true;
   opts.recursion_limit = options.maxRecursionDepth;
   return opts;
@@ -131,7 +131,7 @@ PlanNodeJsonSerializer::deserializeFromJson(
 
   try {
     auto opts = createParseOpts(deserializeOptions_);
-    auto dynamic = folly::json::parse(json, opts);
+    auto dynamic = folly::parseJson(json, opts);
     
     return deserializeFromDynamic(dynamic, pool);
     
@@ -240,7 +240,7 @@ PlanNodeJsonSerializer::formatJson(
   
   try {
     auto opts = createParseOpts(deserializeOptions_);
-    auto dynamic = folly::json::parse(json, opts);
+    auto dynamic = folly::parseJson(json, opts);
     
     result.value = formatDynamicWithOptions(dynamic, options);
     
@@ -300,7 +300,7 @@ void PlanNodeJsonSerializer::collectNodeStatistics(
   stats["totalNodes"] = stats["totalNodes"].asInt() + 1;
   
   // Count node types
-  std::string nodeType = planNode->name();
+  std::string nodeType = std::string(planNode->name());
   if (!stats["nodeTypes"].count(nodeType)) {
     stats["nodeTypes"][nodeType] = 0;
   }
@@ -411,11 +411,12 @@ std::string planNodeToPrettyJson(const PlanNodePtr& planNode, int indentSize) {
 std::pair<PlanNodePtr, std::string> planNodeFromJson(
     const std::string& json,
     memory::MemoryPool* pool) {
-  PlanNodeJsonSerializer::DeserializationOptions opts;
-  opts.validateSchema = true;
-  opts.allowUnknownFields = false;
+  PlanNodeJsonSerializer::SerializationOptions s_opts;
+  PlanNodeJsonSerializer::DeserializationOptions d_opts;
+  d_opts.validateSchema = true;
+  d_opts.allowUnknownFields = false;
   
-  PlanNodeJsonSerializer serializer({}, opts);
+  PlanNodeJsonSerializer serializer(s_opts, d_opts);
   auto result = serializer.deserializeFromJson(json, pool);
   
   std::string error;
@@ -430,7 +431,7 @@ std::vector<std::string> extractPlanNodeTypes(const PlanNodePtr& planNode) {
   std::vector<std::string> types;
   std::function<void(const PlanNodePtr&)> visit = [&](const PlanNodePtr& node) {
     if (!node) return;
-    types.push_back(node->name());
+    types.push_back(std::string(node->name()));
     for (const auto& source : node->sources()) {
       visit(source);
     }
@@ -473,7 +474,7 @@ folly::dynamic generatePlanSummary(const PlanNodePtr& planNode) {
 bool isValidPlanNodeJson(const std::string& json) {
   try {
     PlanNodeJsonSerializer serializer;
-    auto parseResult = folly::json::parse(json);
+    auto parseResult = folly::parseJson(json);
     auto validationResult = serializer.validateJsonSchema(parseResult);
     return validationResult.isSuccess();
   } catch (...) {

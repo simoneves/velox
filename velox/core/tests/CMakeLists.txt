@@ -23,6 +23,7 @@ add_executable(
   StringTest.cpp
   TypeAnalysisTest.cpp
   TypedExprSerdeTest.cpp
+  PlanNodeJsonSerializerTest.cpp
 )
 
 add_test(velox_core_test velox_core_test)

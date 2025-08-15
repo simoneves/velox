@@ -365,13 +365,15 @@ TEST_F(PlanNodeJsonSerializerTest, strictVsLenientDeserialization) {
   auto dynamic = folly::parseJson(json.value);
   dynamic["unknownField"] = "should be ignored or rejected";
   auto modifiedJson = folly::toJson(dynamic);
-  
+
+  PlanNodeJsonSerializer::SerializationOptions serializationOpts;
+
   // Test strict mode (should reject unknown fields)
   PlanNodeJsonSerializer::DeserializationOptions strictOpts;
   strictOpts.allowUnknownFields = false;
   strictOpts.validateSchema = true;
   
-  PlanNodeJsonSerializer strictSerializer({}, strictOpts);
+  PlanNodeJsonSerializer strictSerializer(serializationOpts, strictOpts);
   auto strictResult = strictSerializer.deserializeFromJson(modifiedJson, pool_.get());
   // Note: The actual behavior depends on the underlying Velox deserialization,
   // which may be more lenient than our wrapper suggests
@@ -381,7 +383,7 @@ TEST_F(PlanNodeJsonSerializerTest, strictVsLenientDeserialization) {
   lenientOpts.allowUnknownFields = true;
   lenientOpts.validateSchema = false;
   
-  PlanNodeJsonSerializer lenientSerializer({}, lenientOpts);
+  PlanNodeJsonSerializer lenientSerializer(serializationOpts, lenientOpts);
   auto lenientResult = lenientSerializer.deserializeFromJson(modifiedJson, pool_.get());
   // Should succeed or at least not fail due to unknown fields
 }
