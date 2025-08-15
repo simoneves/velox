@@ -20,6 +20,8 @@
 #include "velox/dwio/common/ReaderFactory.h"
 #include "velox/tpch/gen/TpchGen.h"
 
+#include "velox/core/PlanNodeJsonSerializer.h"
+
 #include <fstream>
 
 namespace facebook::velox::exec::test {
@@ -139,54 +141,84 @@ const std::vector<std::string>& TpchQueryBuilder::getTableNames() {
 }
 
 TpchPlan TpchQueryBuilder::getQueryPlan(int queryId) const {
+    TpchPlan plan;
   switch (queryId) {
     case 1:
-      return getQ1Plan();
+      plan = getQ1Plan();
+      break;
     case 2:
-      return getQ2Plan();
+      plan = getQ2Plan();
+      break;
     case 3:
-      return getQ3Plan();
+      plan = getQ3Plan();
+      break;
     case 4:
-      return getQ4Plan();
+      plan = getQ4Plan();
+      break;
     case 5:
-      return getQ5Plan();
+      plan = getQ5Plan();
+      break;
     case 6:
-      return getQ6Plan();
+      plan = getQ6Plan();
+      break;
     case 7:
-      return getQ7Plan();
+      plan = getQ7Plan();
+      break;
     case 8:
-      return getQ8Plan();
+      plan = getQ8Plan();
+      break;
     case 9:
-      return getQ9Plan();
+      plan = getQ9Plan();
+      break;
     case 10:
-      return getQ10Plan();
+      plan = getQ10Plan();
+      break;
     case 11:
-      return getQ11Plan();
+      plan = getQ11Plan();
+      break;
     case 12:
-      return getQ12Plan();
+      plan = getQ12Plan();
+      break;
     case 13:
-      return getQ13Plan();
+      plan = getQ13Plan();
+      break;
     case 14:
-      return getQ14Plan();
+      plan = getQ14Plan();
+      break;
     case 15:
-      return getQ15Plan();
+      plan = getQ15Plan();
+      break;
     case 16:
-      return getQ16Plan();
+      plan = getQ16Plan();
+      break;
     case 17:
-      return getQ17Plan();
+      plan = getQ17Plan();
+      break;
     case 18:
-      return getQ18Plan();
+      plan = getQ18Plan();
+      break;
     case 19:
-      return getQ19Plan();
+      plan = getQ19Plan();
+      break;
     case 20:
-      return getQ20Plan();
+      plan = getQ20Plan();
+      break;
     case 21:
-      return getQ21Plan();
+      plan = getQ21Plan();
+      break;
     case 22:
-      return getQ22Plan();
+      plan = getQ22Plan();
+      break;
     default:
       VELOX_NYI("TPC-H query {} is not supported yet", queryId);
   }
+
+  // serialize and de-serialize the plan to make sure all nodes are serializable
+  core::PlanNodeJsonSerializer serializer;
+  auto serializedPlan = serializer.serializeToJson(plan.plan);
+  auto deserializedPlan = serializer.deserializeFromJson(serializedPlan.value, pool_.get());
+  plan.plan = std::move(deserializedPlan.value);
+  return plan;
 }
 
 TpchPlan TpchQueryBuilder::getQ1Plan() const {
