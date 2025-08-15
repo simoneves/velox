@@ -24,7 +24,8 @@ velox_add_library(
   PlanNode.cpp
   QueryConfig.cpp
   QueryCtx.cpp
-  SimpleFunctionMetadata.cpp)
+  SimpleFunctionMetadata.cpp
+  PlanNodeJsonSerializer.cpp)
 
 velox_link_libraries(
   velox_core

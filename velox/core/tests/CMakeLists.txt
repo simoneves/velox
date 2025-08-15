@@ -22,7 +22,8 @@ add_executable(
   QueryCtxTest.cpp
   StringTest.cpp
   TypeAnalysisTest.cpp
-  TypedExprSerdeTest.cpp)
+  TypedExprSerdeTest.cpp
+  PlanNodeJsonSerializerTest.cpp)
 
 add_test(velox_core_test velox_core_test)
 
