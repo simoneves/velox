@@ -71,6 +71,8 @@ services:
     privileged: true
     deploy:
       resources:
+        limits:
+          cpus: 12
         reservations:
           devices:
             - driver: nvidia
