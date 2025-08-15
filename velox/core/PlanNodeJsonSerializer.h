@@ -32,37 +32,51 @@ class PlanNodeJsonSerializer {
   /// Options for JSON serialization
   struct SerializationOptions {
     /// Whether to pretty-print JSON with indentation
-    bool prettyPrint = false;
+    bool prettyPrint;
     
     /// Indentation level for pretty printing
-    int indentSize = 2;
+    int indentSize;
     
     /// Whether to include metadata like timestamps
-    bool includeMetadata = false;
+    bool includeMetadata;
     
     /// Whether to sort keys alphabetically  
-    bool sortKeys = true;
+    bool sortKeys;
     
     /// Whether to include source code locations for debugging
-    bool includeSourceLocations = false;
+    bool includeSourceLocations;
     
     /// Maximum recursion depth to prevent infinite loops
-    int maxRecursionDepth = 100;
+    int maxRecursionDepth;
+
+    SerializationOptions() :
+        prettyPrint(false),
+        indentSize(2),
+        includeMetadata(false),
+        sortKeys(true),
+        includeSourceLocations(false),
+        maxRecursionDepth(100) {}
   };
 
   /// Options for JSON deserialization
   struct DeserializationOptions {
     /// Whether to validate JSON schema
-    bool validateSchema = true;
+    bool validateSchema;
     
     /// Whether to allow unknown fields
-    bool allowUnknownFields = false;
+    bool allowUnknownFields;
     
     /// Whether to use strict type checking
-    bool strictTypeChecking = true;
+    bool strictTypeChecking;
     
     /// Maximum recursion depth to prevent infinite loops
-    int maxRecursionDepth = 100;
+    int maxRecursionDepth;
+
+    DeserializationOptions() :
+        validateSchema(true),
+        allowUnknownFields(false),
+        strictTypeChecking(true),
+        maxRecursionDepth(100) {}
   };
 
   /// Error information for serialization/deserialization failures
@@ -86,8 +100,8 @@ class PlanNodeJsonSerializer {
 
  public:
   explicit PlanNodeJsonSerializer(
-      const SerializationOptions& serializeOpts = {},
-      const DeserializationOptions& deserializeOpts = {})
+      SerializationOptions serializeOpts = SerializationOptions{},
+      DeserializationOptions deserializeOpts = DeserializationOptions{})
       : serializeOptions_(serializeOpts), 
         deserializeOptions_(deserializeOpts) {}
 
