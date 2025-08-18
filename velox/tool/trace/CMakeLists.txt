@@ -65,6 +65,7 @@ target_link_libraries(
   velox_vector
   velox_exec
   velox_hive_connector
+  velox_dwio_common
   Folly::folly
   glog::glog
   gflags::gflags)
