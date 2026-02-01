@@ -479,7 +479,7 @@ if(VELOX_ENABLE_WAVE OR VELOX_ENABLE_CUDF)
     message(FATAL_ERROR "-DCMAKE_CUDA_ARCHITECTURES= must be set")
   endif()
   if(CMAKE_BUILD_TYPE MATCHES Debug)
-    set(VELOX_CUDA_DEBUG_FLAGS "$<$<COMPILE_LANGUAGE:CUDA>:-G>")
+    message(STATUS "NOT compiling CUDA with debug info (-G) flag")
   endif()
   find_package(CUDAToolkit REQUIRED)
   # Suppress deprecated GPU targets warning for CUDA 12.8.x
