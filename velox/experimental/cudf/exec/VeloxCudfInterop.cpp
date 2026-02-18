@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "velox/experimental/cudf/exec/ToCudf.h"
+#include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 
 #include "velox/common/memory/Memory.h"
@@ -116,7 +116,8 @@ namespace with_arrow {
 std::unique_ptr<cudf::table> toCudfTable(
     const facebook::velox::RowVectorPtr& veloxTable,
     facebook::velox::memory::MemoryPool* pool,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   // Need to flattenDictionary and flattenConstant, otherwise we observe issues
   // in the null mask. Also, libcudf does not support Arrow binary, so we export
   // VARBINARY as UTF-8.
@@ -136,7 +137,7 @@ std::unique_ptr<cudf::table> toCudfTable(
       std::dynamic_pointer_cast<facebook::velox::BaseVector>(veloxTable),
       arrowSchema,
       arrowOptions);
-  auto tbl = cudf::from_arrow(&arrowSchema, &arrowArray, stream);
+  auto tbl = cudf::from_arrow(&arrowSchema, &arrowArray, stream, mr);
 
   // Release Arrow resources
   if (arrowArray.release) {
@@ -172,7 +173,8 @@ RowVectorPtr toVeloxColumn(
     memory::MemoryPool* pool,
     const std::vector<cudf::column_metadata>& metadata,
     const RowTypePtr* expectedType,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   // To avoid ownership issues, we make copies of the Arrow objects
   // returned from CUDF as unique_ptrs, then mark the originals as
   // released so their destructors don't try to free the resources.
@@ -184,7 +186,7 @@ RowVectorPtr toVeloxColumn(
   //
   // seves 1/17/26
 
-  auto arrowDeviceArray = cudf::to_arrow_host(table, stream);
+  auto arrowDeviceArray = cudf::to_arrow_host(table, stream, mr);
   ArrowArray arrayCopy = arrowDeviceArray->array;
   arrowDeviceArray->array.release = nullptr;
 
@@ -268,9 +270,10 @@ facebook::velox::RowVectorPtr toVeloxColumn(
     const cudf::table_view& table,
     facebook::velox::memory::MemoryPool* pool,
     std::string namePrefix,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   auto metadata = getMetadata(table.begin(), table.end(), namePrefix);
-  return toVeloxColumn(table, pool, metadata, nullptr, stream);
+  return toVeloxColumn(table, pool, metadata, nullptr, stream, mr);
 }
 
 facebook::velox::RowVectorPtr toVeloxColumn(
@@ -278,21 +281,23 @@ facebook::velox::RowVectorPtr toVeloxColumn(
     facebook::velox::memory::MemoryPool* pool,
     const facebook::velox::RowTypePtr& expectedType,
     std::string namePrefix,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   auto metadata = getMetadata(table.begin(), table.end(), namePrefix);
-  return toVeloxColumn(table, pool, metadata, &expectedType, stream);
+  return toVeloxColumn(table, pool, metadata, &expectedType, stream, mr);
 }
 
 RowVectorPtr toVeloxColumn(
     const cudf::table_view& table,
     memory::MemoryPool* pool,
     const std::vector<std::string>& columnNames,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   std::vector<cudf::column_metadata> metadata;
   for (auto name : columnNames) {
     metadata.emplace_back(cudf::column_metadata(name));
   }
-  return toVeloxColumn(table, pool, metadata, nullptr, stream);
+  return toVeloxColumn(table, pool, metadata, nullptr, stream, mr);
 }
 
 } // namespace with_arrow

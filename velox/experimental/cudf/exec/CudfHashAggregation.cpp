@@ -15,9 +15,11 @@
  */
 
 #include "velox/experimental/cudf/CudfConfig.h"
+#include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/exec/CudfFilterProject.h"
 #include "velox/experimental/cudf/exec/CudfHashAggregation.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationKernels.h"
+#include "velox/experimental/cudf/exec/GpuResources.h"
 #include "velox/experimental/cudf/exec/Utilities.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 
@@ -46,60 +48,67 @@ namespace {
 
 using namespace facebook::velox;
 
-#define DEFINE_SIMPLE_AGGREGATOR(Name, name, KIND)                            \
-  struct Name##Aggregator : cudf_velox::CudfHashAggregation::Aggregator {     \
-    Name##Aggregator(                                                         \
-        core::AggregationNode::Step step,                                     \
-        uint32_t inputIndex,                                                  \
-        VectorPtr constant,                                                   \
-        bool is_global,                                                       \
-        const TypePtr& resultType)                                            \
-        : Aggregator(                                                         \
-              step,                                                           \
-              cudf::aggregation::KIND,                                        \
-              inputIndex,                                                     \
-              constant,                                                       \
-              is_global,                                                      \
-              resultType) {}                                                  \
-                                                                              \
-    void addGroupbyRequest(                                                   \
-        cudf::table_view const& tbl,                                          \
-        std::vector<cudf::groupby::aggregation_request>& requests) override { \
-      VELOX_CHECK(                                                            \
-          constant == nullptr,                                                \
-          #Name "Aggregator does not yet support constant input");            \
-      auto& request = requests.emplace_back();                                \
-      output_idx = requests.size() - 1;                                       \
-      request.values = tbl.column(inputIndex);                                \
-      request.aggregations.push_back(                                         \
-          cudf::make_##name##_aggregation<cudf::groupby_aggregation>());      \
-    }                                                                         \
-                                                                              \
-    std::unique_ptr<cudf::column> makeOutputColumn(                           \
-        std::vector<cudf::groupby::aggregation_result>& results,              \
-        rmm::cuda_stream_view stream) override {                              \
-      auto col = std::move(results[output_idx].results[0]);                   \
-      auto const cudfResType = cudf_velox::veloxToCudfDataType(resultType);   \
-      if (col->type() != cudfResType) {                                       \
-        col = cudf::cast(*col, cudfResType, stream);                          \
-      }                                                                       \
-      return col;                                                             \
-    }                                                                         \
-                                                                              \
-    std::unique_ptr<cudf::column> doReduce(                                   \
-        cudf::table_view const& input,                                        \
-        TypePtr const& outputType,                                            \
-        rmm::cuda_stream_view stream) override {                              \
-      auto const aggRequest =                                                 \
-          cudf::make_##name##_aggregation<cudf::reduce_aggregation>();        \
-      auto const cudfOutType = cudf_velox::veloxToCudfDataType(outputType);   \
-      auto const resultScalar = cudf::reduce(                                 \
-          input.column(inputIndex), *aggRequest, cudfOutType, stream);        \
-      return cudf::make_column_from_scalar(*resultScalar, 1, stream);         \
-    }                                                                         \
-                                                                              \
-   private:                                                                   \
-    uint32_t output_idx;                                                      \
+#define DEFINE_SIMPLE_AGGREGATOR(Name, name, KIND)                             \
+  struct Name##Aggregator : cudf_velox::CudfHashAggregation::Aggregator {      \
+    Name##Aggregator(                                                          \
+        core::AggregationNode::Step step,                                      \
+        uint32_t inputIndex,                                                   \
+        VectorPtr constant,                                                    \
+        bool is_global,                                                        \
+        const TypePtr& resultType)                                             \
+        : Aggregator(                                                          \
+              step,                                                            \
+              cudf::aggregation::KIND,                                         \
+              inputIndex,                                                      \
+              constant,                                                        \
+              is_global,                                                       \
+              resultType) {}                                                   \
+                                                                               \
+    void addGroupbyRequest(                                                    \
+        cudf::table_view const& tbl,                                           \
+        std::vector<cudf::groupby::aggregation_request>& requests) override {  \
+      VELOX_CHECK(                                                             \
+          constant == nullptr,                                                 \
+          #Name "Aggregator does not yet support constant input");             \
+      auto& request = requests.emplace_back();                                 \
+      output_idx = requests.size() - 1;                                        \
+      request.values = tbl.column(inputIndex);                                 \
+      request.aggregations.push_back(                                          \
+          cudf::make_##name##_aggregation<cudf::groupby_aggregation>());       \
+    }                                                                          \
+                                                                               \
+    std::unique_ptr<cudf::column> makeOutputColumn(                            \
+        std::vector<cudf::groupby::aggregation_result>& results,               \
+        rmm::cuda_stream_view stream) override {                               \
+      auto col = std::move(results[output_idx].results[0]);                    \
+      const auto cudfType =                                                    \
+          cudf_velox::veloxToCudfDataType(resultType);                         \
+      if (col->type() != cudfType) {                                           \
+        col = cudf::cast(*col, cudfType, stream, cudf_velox::get_output_mr()); \
+      }                                                                        \
+      return col;                                                              \
+    }                                                                          \
+                                                                               \
+    std::unique_ptr<cudf::column> doReduce(                                    \
+        cudf::table_view const& input,                                         \
+        TypePtr const& outputType,                                             \
+        rmm::cuda_stream_view stream) override {                               \
+      auto const aggRequest =                                                  \
+          cudf::make_##name##_aggregation<cudf::reduce_aggregation>();         \
+      auto const cudfOutputType =                                              \
+          cudf_velox::veloxToCudfDataType(outputType);                         \
+      auto const resultScalar = cudf::reduce(                                  \
+          input.column(inputIndex),                                            \
+          *aggRequest,                                                         \
+          cudfOutputType,                                                      \
+          stream,                                                              \
+          cudf_velox::get_temp_mr());                                          \
+      return cudf::make_column_from_scalar(                                    \
+          *resultScalar, 1, stream, cudf_velox::get_output_mr());              \
+    }                                                                          \
+                                                                               \
+   private:                                                                    \
+    uint32_t output_idx;                                                       \
   };
 
 DEFINE_SIMPLE_AGGREGATOR(Sum, sum, SUM)
@@ -399,18 +408,25 @@ struct CountAggregator : cudf_velox::CudfHashAggregation::Aggregator {
           ? inputCol.size() - inputCol.null_count()
           : inputCol.size();
 
-      auto resultScalar = cudf::numeric_scalar<int64_t>(count);
+      auto resultScalar = cudf::numeric_scalar<int64_t>(
+          count, true, stream, cudf_velox::get_temp_mr());
 
-      return cudf::make_column_from_scalar(resultScalar, 1, stream);
+      return cudf::make_column_from_scalar(
+          resultScalar, 1, stream, cudf_velox::get_output_mr());
     } else {
       // For non-raw input (intermediate/final), use sum aggregation
       auto const aggRequest =
           cudf::make_sum_aggregation<cudf::reduce_aggregation>();
       auto const cudfOutputType = cudf::data_type(cudf::type_id::INT64);
       auto const resultScalar = cudf::reduce(
-          input.column(inputIndex), *aggRequest, cudfOutputType, stream);
+          input.column(inputIndex),
+          *aggRequest,
+          cudfOutputType,
+          stream,
+          cudf_velox::get_temp_mr());
       resultScalar->set_valid_async(true, stream);
-      return cudf::make_column_from_scalar(*resultScalar, 1, stream);
+      return cudf::make_column_from_scalar(
+          *resultScalar, 1, stream, cudf_velox::get_output_mr());
     }
     return nullptr;
   }
@@ -422,7 +438,8 @@ struct CountAggregator : cudf_velox::CudfHashAggregation::Aggregator {
     auto col = std::move(results[outputIdx_].results[0]);
     const auto cudfOutputType = cudf_velox::veloxToCudfDataType(resultType);
     if (col->type() != cudfOutputType) {
-      col = cudf::cast(*col, cudfOutputType, stream);
+      col =
+          cudf::cast(*col, cudfOutputType, stream, cudf_velox::get_output_mr());
     }
     return col;
   }
@@ -506,15 +523,23 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
         auto count = std::move(results[sumIdx_].results[1]);
 
         auto const size = sum->size();
-        auto const cudfSumType =
+        auto const cudfSumDataType =
             cudf_velox::veloxToCudfDataType(outputType->childAt(0));
-        auto const cudfCountType =
+        auto const cudfCountDataType =
             cudf_velox::veloxToCudfDataType(outputType->childAt(1));
-        if (sum->type() != cudfSumType) {
-          sum = cudf::cast(*sum, cudfSumType, stream);
+        if (sum->type() != cudfSumDataType) {
+          sum = cudf::cast(
+              *sum,
+              cudfSumDataType,
+              stream,
+              cudf_velox::get_output_mr());
         }
-        if (count->type() != cudf::data_type(cudfCountType)) {
-          count = cudf::cast(*count, cudf::data_type(cudfCountType), stream);
+        if (count->type() != cudfCountDataType) {
+          count = cudf::cast(
+              *count,
+              cudfCountDataType,
+              stream,
+              cudf_velox::get_output_mr());
         }
 
         auto children = std::vector<std::unique_ptr<cudf::column>>();
@@ -542,15 +567,23 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
         auto count = std::move(results[countIdx_].results[0]);
 
         auto size = sum->size();
-        auto const cudfSumType =
+        auto const cudfSumDataType = 
             cudf_velox::veloxToCudfDataType(outputType->childAt(0));
-        auto const cudfCountType =
+        auto const cudfCountDataType = 
             cudf_velox::veloxToCudfDataType(outputType->childAt(1));
-        if (sum->type() != cudfSumType) {
-          sum = cudf::cast(*sum, cudfSumType, stream);
+        if (sum->type() != cudfSumDataType) {
+          sum = cudf::cast(
+              *sum,
+              cudfSumDataType,
+              stream,
+              cudf_velox::get_output_mr());
         }
-        if (count->type() != cudf::data_type(cudfCountType)) {
-          count = cudf::cast(*count, cudf::data_type(cudfCountType), stream);
+        if (count->type() != cudfCountDataType) {
+          count = cudf::cast(
+              *count,
+              cudfCountDataType,
+              stream,
+              cudf_velox::get_output_mr());
         }
 
         auto children = std::vector<std::unique_ptr<cudf::column>>();
@@ -573,7 +606,8 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
             *count,
             cudf::binary_operator::DIV,
             cudf_velox::veloxToCudfDataType(resultType),
-            stream);
+            stream,
+            cudf_velox::get_output_mr());
         return avg;
       }
       default:
@@ -591,8 +625,13 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
             cudf::make_mean_aggregation<cudf::reduce_aggregation>();
         auto const cudfOutputType = cudf_velox::veloxToCudfDataType(outputType);
         auto const resultScalar = cudf::reduce(
-            input.column(inputIndex), *aggRequest, cudfOutputType, stream);
-        return cudf::make_column_from_scalar(*resultScalar, 1, stream);
+            input.column(inputIndex),
+            *aggRequest,
+            cudfOutputType,
+            stream,
+            cudf_velox::get_temp_mr());
+        return cudf::make_column_from_scalar(
+            *resultScalar, 1, stream, cudf_velox::get_output_mr());
       }
       case core::AggregationNode::Step::kPartial: {
         VELOX_CHECK(outputType->isRow());
@@ -606,18 +645,26 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
         auto const aggRequest =
             cudf::make_sum_aggregation<cudf::reduce_aggregation>();
         auto const sumResultScalar = cudf::reduce(
-            input.column(inputIndex), *aggRequest, cudfSumType, stream);
-        auto sumCol =
-            cudf::make_column_from_scalar(*sumResultScalar, 1, stream);
+            input.column(inputIndex),
+            *aggRequest,
+            cudfSumType,
+            stream,
+            cudf_velox::get_temp_mr());
+        auto sumCol = cudf::make_column_from_scalar(
+            *sumResultScalar, 1, stream, cudf_velox::get_output_mr());
 
         // libcudf doesn't have a count agg for reduce. What we want is to
         // count the number of valid rows.
         auto countCol = cudf::make_column_from_scalar(
             cudf::numeric_scalar<int64_t>(
                 input.column(inputIndex).size() -
-                input.column(inputIndex).null_count()),
+                    input.column(inputIndex).null_count(),
+                true,
+                stream,
+                cudf_velox::get_temp_mr()),
             1,
-            stream);
+            stream,
+            cudf_velox::get_output_mr());
 
         // Assemble into struct as expected by velox.
         auto children = std::vector<std::unique_ptr<cudf::column>>();
@@ -639,16 +686,24 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
         // sum the sums
         auto const sumAggRequest =
             cudf::make_sum_aggregation<cudf::reduce_aggregation>();
-        auto const sumResultScalar =
-            cudf::reduce(sumCol, *sumAggRequest, sumCol.type(), stream);
-        auto sumResultCol =
-            cudf::make_column_from_scalar(*sumResultScalar, 1, stream);
+        auto const sumResultScalar = cudf::reduce(
+            sumCol,
+            *sumAggRequest,
+            sumCol.type(),
+            stream,
+            cudf_velox::get_temp_mr());
+        auto sumResultCol = cudf::make_column_from_scalar(
+            *sumResultScalar, 1, stream, cudf_velox::get_output_mr());
 
         // sum the counts
         auto const countAggRequest =
             cudf::make_sum_aggregation<cudf::reduce_aggregation>();
-        auto const countResultScalar =
-            cudf::reduce(countCol, *countAggRequest, countCol.type(), stream);
+        auto const countResultScalar = cudf::reduce(
+            countCol,
+            *countAggRequest,
+            countCol.type(),
+            stream,
+            cudf_velox::get_temp_mr());
 
         // divide the sums by the counts
         auto const cudfOutputType = cudf_velox::veloxToCudfDataType(outputType);
@@ -657,7 +712,8 @@ struct MeanAggregator : cudf_velox::CudfHashAggregation::Aggregator {
             *countResultScalar,
             cudf::binary_operator::DIV,
             cudfOutputType,
-            stream);
+            stream,
+            cudf_velox::get_output_mr());
       }
       default:
         VELOX_NYI("Unsupported aggregation step for mean");
@@ -862,7 +918,11 @@ struct ApproxDistinctAggregator : cudf_velox::CudfHashAggregation::Aggregator {
 
     if (sketch_column.size() == 0) {
       return cudf::make_column_from_scalar(
-          cudf::numeric_scalar<int64_t>(0, true, stream), 1, stream);
+          cudf::numeric_scalar<int64_t>(
+              0, true, stream, cudf_velox::get_temp_mr()),
+          1,
+          stream,
+          cudf_velox::get_output_mr());
     }
 
     return mergeSketchesAndApply(
@@ -871,9 +931,13 @@ struct ApproxDistinctAggregator : cudf_velox::CudfHashAggregation::Aggregator {
           std::size_t estimate = sketch.estimate(stream);
           return cudf::make_column_from_scalar(
               cudf::numeric_scalar<int64_t>(
-                  static_cast<int64_t>(estimate), true, stream),
+                  static_cast<int64_t>(estimate),
+                  true,
+                  stream,
+                  cudf_velox::get_temp_mr()),
               1,
-              stream);
+              stream,
+              cudf_velox::get_output_mr());
         },
         stream);
   }
@@ -1197,8 +1261,8 @@ void CudfHashAggregation::computeIntermediateGroupbyPartial(CudfVectorPtr tbl) {
         partialOutputStream);
 
     // Concatenate the tables
-    auto concatenatedTable =
-        cudf::concatenate(tablesToConcat, partialOutputStream);
+    auto concatenatedTable = cudf::concatenate(
+        tablesToConcat, partialOutputStream, cudf_velox::get_output_mr());
 
     // Now we have to groupby again but this time with intermediate aggregators.
     // Keep concatenatedTable alive while we use its view.
@@ -1236,8 +1300,8 @@ void CudfHashAggregation::computeIntermediateDistinctPartial(
         std::vector<rmm::cuda_stream_view>{inputTableStream},
         partialOutputStream);
 
-    auto concatenatedTable =
-        cudf::concatenate(tablesToConcat, partialOutputStream);
+    auto concatenatedTable = cudf::concatenate(
+        tablesToConcat, partialOutputStream, cudf_velox::get_output_mr());
 
     // Do a distinct on the concatenated results.
     // Keep concatenatedTable alive while we use its view.
@@ -1302,7 +1366,8 @@ CudfVectorPtr CudfHashAggregation::doGroupByAggregation(
     aggregator->addGroupbyRequest(tableView, requests);
   }
 
-  auto [groupKeys, results] = groupByOwner.aggregate(requests, stream);
+  auto [groupKeys, results] =
+      groupByOwner.aggregate(requests, stream, cudf_velox::get_output_mr());
   // flatten the results
   std::vector<std::unique_ptr<cudf::column>> resultColumns;
 
@@ -1360,7 +1425,8 @@ CudfVectorPtr CudfHashAggregation::getDistinctKeys(
       cudf::duplicate_keep_option::KEEP_FIRST,
       cudf::null_equality::EQUAL,
       cudf::nan_equality::ALL_EQUAL,
-      stream);
+      stream,
+      cudf_velox::get_output_mr());
 
   auto numRows = result->num_rows();
 
@@ -1430,7 +1496,8 @@ RowVectorPtr CudfHashAggregation::getOutput() {
 
   auto stream = cudfGlobalStreamPool().get_stream();
 
-  auto tbl = getConcatenatedTable(inputs_, inputType_, stream);
+  auto tbl = getConcatenatedTable(
+      inputs_, inputType_, stream, cudf_velox::get_output_mr());
 
   // Release input data after synchronizing.
   stream.synchronize();
