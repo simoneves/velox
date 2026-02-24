@@ -253,11 +253,11 @@ struct DecimalSumOrAvgAggregator : cudf_velox::CudfHashAggregation::Aggregator {
       auto const sumAgg =
           cudf::make_sum_aggregation<cudf::reduce_aggregation>();
       cudf::column_view inputCol = input.column(inputIndex);
-      auto sumScalar = cudf::reduce(inputCol, *sumAgg, inputCol.type(), stream, cudf_velox::get_output_mr());
+      auto sumScalar = cudf::reduce(inputCol, *sumAgg, inputCol.type(), stream, cudf_velox::get_temp_mr());
       auto countAgg = cudf::make_count_aggregation<cudf::reduce_aggregation>(
           cudf::null_policy::EXCLUDE);
       auto countScalar = cudf::reduce(
-          inputCol, *countAgg, cudf::data_type{cudf::type_id::INT64}, stream, cudf_velox::get_output_mr());
+          inputCol, *countAgg, cudf::data_type{cudf::type_id::INT64}, stream, cudf_velox::get_temp_mr());
       auto sumCol = cudf::make_column_from_scalar(*sumScalar, 1, stream, cudf_velox::get_output_mr());
       auto countCol = cudf::make_column_from_scalar(*countScalar, 1, stream, cudf_velox::get_output_mr());
       return computeAvgColumn(std::move(sumCol), std::move(countCol), stream);
