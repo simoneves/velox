@@ -142,7 +142,8 @@ struct StateValidPredicate {
 std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMask(
     const cudf::column_view& sumCol,
     const cudf::column_view& countCol,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   auto numRows = sumCol.size();
   if (numRows == 0) {
     return {rmm::device_buffer{}, 0};
@@ -153,7 +154,7 @@ std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMask(
   auto begin = thrust::make_counting_iterator<cudf::size_type>(0);
   auto end = begin + numRows;
   return cudf::detail::valid_if(
-      begin, end, pred, stream, cudf::get_current_device_resource_ref());
+      begin, end, pred, stream, mr);
 }
 
 } // namespace
@@ -161,7 +162,8 @@ std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMask(
 DecimalSumStateColumns deserializeDecimalSumStateWithCount(
     const cudf::column_view& stateCol,
     int32_t scale,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   CUDF_EXPECTS(
       stateCol.type().id() == cudf::type_id::STRING,
       "Decimal sum state requires STRING/VARBINARY column");
@@ -247,11 +249,11 @@ DecimalSumStateColumns deserializeDecimalSumStateWithCount(
 
   if (stateCol.nullable()) {
     auto nullMask = cudf::detail::copy_bitmask(
-        stateCol, stream, cudf::get_current_device_resource_ref());
+        stateCol, stream, mr);
     auto nullCount = stateCol.null_count();
     sumCol->set_null_mask(std::move(nullMask), nullCount);
     auto countMask = cudf::detail::copy_bitmask(
-        stateCol, stream, cudf::get_current_device_resource_ref());
+        stateCol, stream, mr);
     countCol->set_null_mask(std::move(countMask), nullCount);
   }
 
@@ -264,15 +266,17 @@ DecimalSumStateColumns deserializeDecimalSumStateWithCount(
 std::unique_ptr<cudf::column> deserializeDecimalSumState(
     const cudf::column_view& stateCol,
     int32_t scale,
-    rmm::cuda_stream_view stream) {
-  auto decoded = deserializeDecimalSumStateWithCount(stateCol, scale, stream);
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
+  auto decoded = deserializeDecimalSumStateWithCount(stateCol, scale, stream, mr);
   return std::move(decoded.sum);
 }
 
 std::unique_ptr<cudf::column> serializeDecimalSumState(
     const cudf::column_view& sumCol,
     const cudf::column_view& countCol,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   CUDF_EXPECTS(
       countCol.type().id() == cudf::type_id::INT64,
       "Decimal sum state requires INT64 count column");
@@ -368,7 +372,7 @@ std::unique_ptr<cudf::column> serializeDecimalSumState(
     CUDF_CUDA_TRY(cudaGetLastError());
   }
 
-  auto [nullMask, nullCount] = buildStateValidityMask(sumCol, countCol, stream);
+  auto [nullMask, nullCount] = buildStateValidityMask(sumCol, countCol, stream, mr);
   return cudf::make_strings_column(
       static_cast<cudf::size_type>(numRows),
       std::move(offsetsCol),
@@ -380,7 +384,8 @@ std::unique_ptr<cudf::column> serializeDecimalSumState(
 std::unique_ptr<cudf::column> computeDecimalAverage(
     const cudf::column_view& sumCol,
     const cudf::column_view& countCol,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   CUDF_EXPECTS(
       countCol.type().id() == cudf::type_id::INT64,
       "Decimal average requires INT64 count column");
@@ -415,7 +420,7 @@ std::unique_ptr<cudf::column> computeDecimalAverage(
     CUDF_CUDA_TRY(cudaGetLastError());
   }
 
-  auto [nullMask, nullCount] = buildStateValidityMask(sumCol, countCol, stream);
+  auto [nullMask, nullCount] = buildStateValidityMask(sumCol, countCol, stream, mr);
   if (nullCount > 0) {
     out->set_null_mask(std::move(nullMask), nullCount);
   } else if (nullMask.size() > 0) {

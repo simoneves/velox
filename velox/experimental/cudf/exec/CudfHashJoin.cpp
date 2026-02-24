@@ -820,7 +820,7 @@ std::vector<std::unique_ptr<cudf::table>> CudfHashJoinProbe::innerJoin(
               auto filterTable =
                   std::make_unique<cudf::table>(std::move(joinedCols));
               auto filteredTable =
-                  cudf::apply_boolean_mask(*filterTable, filterColumn, stream);
+                  cudf::apply_boolean_mask(*filterTable, filterColumn, stream, cudf_velox::get_output_mr());
               return filteredTable->release();
             };
         cudfOutputs.push_back(filteredOutput(
@@ -915,7 +915,7 @@ std::vector<std::unique_ptr<cudf::table>> CudfHashJoinProbe::leftJoin(
               auto filterTable =
                   std::make_unique<cudf::table>(std::move(joinedCols));
               auto filteredTable =
-                  cudf::apply_boolean_mask(*filterTable, filterColumn, stream);
+                  cudf::apply_boolean_mask(*filterTable, filterColumn, stream, cudf_velox::get_output_mr());
               return filteredTable->release();
             };
         cudfOutputs.push_back(filteredOutput(
