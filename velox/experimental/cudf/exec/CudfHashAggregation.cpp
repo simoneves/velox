@@ -1752,6 +1752,14 @@ bool registerStepAwareBuiltinAggregationFunctions(const std::string& prefix) {
           .integerVariable("s")
           .returnType("decimal(p,s)")
           .argumentType("decimal(p,s)")
+          .build(),
+      FunctionSignatureBuilder()
+          .returnType("date")
+          .argumentType("date")
+          .build(),
+      FunctionSignatureBuilder()
+          .returnType("timestamp")
+          .argumentType("timestamp")
           .build()};
 
   registerAggregationFunctionForStep(
