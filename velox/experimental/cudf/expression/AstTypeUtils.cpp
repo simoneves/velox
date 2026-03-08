@@ -18,12 +18,15 @@
 
 namespace facebook::velox::cudf_velox {
 
+// For now, we reject DECIMAL, TIMESTAMP, and DATE.
+// @TODO Implement support for these types in AST.
+
 bool containsAstUnsupportedType(
     const std::shared_ptr<velox::exec::Expr>& expr) {
-  if (!expr) {
+  if (!expr || !expr->type()) {
     return false;
   }
-  if (expr->type() && expr->type()->isTimestamp()) {
+  if (expr->type()->isTimestamp() || expr->type()->isDecimal()) {
     return true;
   }
   for (const auto& input : expr->inputs()) {
