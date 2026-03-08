@@ -1939,30 +1939,6 @@ bool registerBuiltinFunctions(const std::string& prefix) {
            .build()});
 
   registerCudfFunction(
-      "and",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<LogicalFunction>(
-            expr, cudf::binary_operator::LOGICAL_AND);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("boolean")
-           .variableArity("boolean")
-           .build()});
-
-  registerCudfFunction(
-      "or",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<LogicalFunction>(
-            expr, cudf::binary_operator::LOGICAL_OR);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("boolean")
-           .variableArity("boolean")
-           .build()});
-
-  registerCudfFunction(
       prefix + "round",
       [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
         return std::make_shared<RoundFunction>(expr);
@@ -2263,50 +2239,6 @@ bool registerBuiltinFunctions(const std::string& prefix) {
   registerBinaryOp({prefix + "mod"}, cudf::binary_operator::MOD);
 
   //
-  // regular comparison operators
-  //
-
-  auto registerComparisonOp = [&](const std::vector<std::string>& aliases,
-                                  cudf::binary_operator op) {
-    registerCudfFunctions(
-        aliases,
-        [op](
-            const std::string&,
-            const std::shared_ptr<velox::exec::Expr>& expr) {
-          return std::make_shared<BinaryFunction>(expr, op);
-        },
-        {FunctionSignatureBuilder()
-             .returnType("boolean")
-             .argumentType("double")
-             .argumentType("double")
-             .build(),
-         FunctionSignatureBuilder()
-             .integerVariable("a_precision")
-             .integerVariable("a_scale")
-             .integerVariable("b_precision")
-             .integerVariable("b_scale")
-             .returnType("boolean")
-             .argumentType("decimal(a_precision, a_scale)")
-             .argumentType("decimal(b_precision, b_scale)")
-             .build()});
-  };
-
-  registerComparisonOp(
-      {prefix + "equal", prefix + "eq"}, cudf::binary_operator::EQUAL);
-  registerComparisonOp(
-      {prefix + "notequal", prefix + "neq"}, cudf::binary_operator::NOT_EQUAL);
-  registerComparisonOp(
-      {prefix + "greaterthanorequal", prefix + "gte"},
-      cudf::binary_operator::GREATER_EQUAL);
-  registerComparisonOp(
-      {prefix + "lessthanorequal", prefix + "lte"},
-      cudf::binary_operator::LESS_EQUAL);
-  registerComparisonOp(
-      {prefix + "greaterthan", prefix + "gt"}, cudf::binary_operator::GREATER);
-  registerComparisonOp(
-      {prefix + "lessthan", prefix + "lt"}, cudf::binary_operator::LESS);
-
-  //
   // regular unary operators
   //
 
@@ -2343,30 +2275,6 @@ bool registerBuiltinFunctions(const std::string& prefix) {
   // truncate
   // no direct cudf mapping
   // perhaps a compound operation using round/round_decimal
-
-  //
-  // between
-  //
-
-  registerCudfFunction(
-      prefix + "between",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<BetweenFunction>(expr);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("boolean")
-           .argumentType("double")
-           .argumentType("double")
-           .argumentType("double")
-           .build(),
-       FunctionSignatureBuilder()
-           .integerVariable("p")
-           .integerVariable("s")
-           .returnType("boolean")
-           .argumentType("decimal(p,s)")
-           .argumentType("decimal(p,s)")
-           .argumentType("decimal(p,s)")
-           .build()});
 
   //
   // greatest & least
@@ -2410,7 +2318,6 @@ bool registerBuiltinFunctions(const std::string& prefix) {
            .variableArity("decimal(p,s)")
            .build()});
 
-
   registerCudfFunction(
       prefix + "date_trunc",
       [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
@@ -2427,35 +2334,6 @@ bool registerBuiltinFunctions(const std::string& prefix) {
            .argumentType("date")
            .build()});
 
-  registerCudfFunction(
-      prefix + "divide",
-      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
-        return std::make_shared<BinaryFunction>(
-            expr, cudf::binary_operator::DIV);
-      },
-      {FunctionSignatureBuilder()
-           .returnType("double")
-           .argumentType("double")
-           .argumentType("double")
-           .build()});
-
-  const std::vector<exec::FunctionSignaturePtr> comparisonSignatures{
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("double")
-          .argumentType("double")
-          .build(),
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("timestamp")
-          .argumentType("timestamp")
-          .build(),
-      FunctionSignatureBuilder()
-          .returnType("boolean")
-          .argumentType("date")
-          .argumentType("date")
-          .build()};
-
   auto registerComparisonOp = [&](const std::vector<std::string>& aliases,
                                   cudf::binary_operator op) {
     registerCudfFunctions(
@@ -2465,13 +2343,37 @@ bool registerBuiltinFunctions(const std::string& prefix) {
             const std::shared_ptr<velox::exec::Expr>& expr) {
           return std::make_shared<BinaryFunction>(expr, op);
         },
-        comparisonSignatures);
+        {FunctionSignatureBuilder()
+          .returnType("boolean")
+          .argumentType("double")
+          .argumentType("double")
+          .build(),
+         FunctionSignatureBuilder()
+          .returnType("boolean")
+          .argumentType("timestamp")
+          .argumentType("timestamp")
+          .build(),
+         FunctionSignatureBuilder()
+          .returnType("boolean")
+          .argumentType("date")
+          .argumentType("date")
+          .build(),
+         FunctionSignatureBuilder()
+          .integerVariable("a_precision")
+          .integerVariable("a_scale")
+          .integerVariable("b_precision")
+          .integerVariable("b_scale")
+          .returnType("boolean")
+          .argumentType("decimal(a_precision, a_scale)")
+          .argumentType("decimal(b_precision, b_scale)")
+          .build()}
+      );
   };
 
   registerComparisonOp(
-      {prefix + "equalto", prefix + "eq"}, cudf::binary_operator::EQUAL);
+      {prefix + "equal", prefix + "equalto", prefix + "eq"}, cudf::binary_operator::EQUAL);
   registerComparisonOp(
-      {prefix + "notequalto", prefix + "neq"},
+      {prefix + "notequal", prefix + "notequalto", prefix + "neq"},
       cudf::binary_operator::NOT_EQUAL);
   registerComparisonOp(
       {prefix + "greaterthanorequal", prefix + "gte"},
