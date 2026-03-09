@@ -43,6 +43,7 @@
 #include <cudf/scalar/scalar_factories.hpp>
 #include <cudf/strings/attributes.hpp>
 #include <cudf/strings/case.hpp>
+#include <cudf/strings/combine.hpp>
 #include <cudf/strings/contains.hpp>
 #include <cudf/strings/convert/convert_datetime.hpp>
 #include <cudf/strings/convert/convert_integers.hpp>
@@ -1740,6 +1741,24 @@ class ContainsFunction : public CudfFunction {
   std::string pattern_;
 };
 
+class ConcatFunction : public CudfFunction {
+ public:
+  explicit ConcatFunction(const std::shared_ptr<velox::exec::Expr>& expr) {
+    VELOX_CHECK_EQ(expr->inputs().size(), 2, "concat expects 2 inputs");
+  }
+
+  ColumnOrView eval(
+      std::vector<ColumnOrView>& inputColumns,
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) const override {
+    auto lhsCol = asView(inputColumns[0]);
+    auto rhsCol = asView(inputColumns[1]);
+    cudf::table_view table({lhsCol, rhsCol});
+    cudf::string_scalar emptyString("");
+    return cudf::strings::concatenate(table, emptyString, emptyString, cudf::strings::separator_on_nulls::YES, stream, mr);
+  }
+};
+
 bool registerCudfFunction(
     const std::string& name,
     CudfFunctionFactory factory,
@@ -2134,6 +2153,17 @@ bool registerBuiltinFunctions(const std::string& prefix) {
            .returnType("boolean")
            .argumentType("varchar")
            .constantArgumentType("varchar")
+           .build()});
+
+  registerCudfFunction(
+      prefix + "concat",
+      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+        return std::make_shared<ConcatFunction>(expr);
+      },
+      {FunctionSignatureBuilder()
+           .returnType("varchar")
+           .argumentType("varchar")
+           .argumentType("varchar")
            .build()});
 
   // No prefix because switch and if are special form
