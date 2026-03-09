@@ -77,6 +77,9 @@ void CudfTpcdsBenchmark::initQueryBuilder() {
 }
 
 void CudfTpcdsBenchmark::initialize() {
+  // set this so that CUDF functions are registered with the correct prefix
+  cudf_velox::CudfConfig::getInstance().functionNamePrefix = "presto.default.";
+
   TpcdsBenchmark::initialize();
 
   if (FLAGS_velox_cudf_table_scan) {
