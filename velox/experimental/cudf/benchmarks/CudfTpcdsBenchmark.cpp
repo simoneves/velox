@@ -25,6 +25,8 @@
 #include "velox/connectors/hive/HiveConnector.h"
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 
+#include <cudf/context.hpp>
+
 DECLARE_string(data_path);
 DECLARE_string(data_format);
 DECLARE_int64(max_coalesced_bytes);
@@ -148,4 +150,5 @@ int main(int argc, char** argv) {
     tpcdsBenchmark = std::make_unique<TpcdsBenchmark>();
   }
   tpcdsBenchmarkMain();
+  cudf::teardown();
 }
