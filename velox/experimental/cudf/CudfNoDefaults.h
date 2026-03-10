@@ -39,22 +39,22 @@
 #include <rmm/mr/per_device_resource.hpp>
 #include <rmm/resource_ref.hpp>
 
-namespace cudf {
+// namespace cudf {
 
-#if defined(__GNUC__) && !defined(__clang__)
+// #if defined(__GNUC__) && !defined(__clang__)
 
-__attribute__((
-    error("cudf default stream argument used. Pass stream explicitly."),
-    noinline)) rmm::cuda_stream_view const get_default_stream();
+// __attribute__((
+//     error("cudf default stream argument used. Pass stream explicitly."),
+//     noinline)) rmm::cuda_stream_view const get_default_stream();
 
-__attribute__((
-    error("cudf default memory resource argument used. Pass mr explicitly."),
-    noinline)) rmm::device_async_resource_ref
-get_current_device_resource_ref();
+// __attribute__((
+//     error("cudf default memory resource argument used. Pass mr explicitly."),
+//     noinline)) rmm::device_async_resource_ref
+// get_current_device_resource_ref();
 
-#endif
+// #endif
 
-} // namespace cudf
+// } // namespace cudf
 
 namespace facebook::velox::cudf_velox {
 
