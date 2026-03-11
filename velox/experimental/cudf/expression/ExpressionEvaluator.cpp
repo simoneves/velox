@@ -1745,13 +1745,26 @@ class ConcatFunction : public CudfFunction {
  public:
   explicit ConcatFunction(const std::shared_ptr<velox::exec::Expr>& expr) {
     using velox::exec::ConstantExpr;
-    VELOX_CHECK_EQ(expr->inputs().size(), 2, "concat expects 2 inputs");
+    numInputs_ = expr->inputs().size();
+    VELOX_CHECK_GE(numInputs_, 2, "concat expects at least 2 inputs");
 
-    if (auto constant0 = std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[0])) {
-      lhsString_ = constant0->value()->toString(0);
+    // Scan inputs for literals and store strings in map by input index.
+    // Capture the size of the first non-literal input column and validate all others.
+    for (size_t i = 0; i < numInputs_; ++i) {
+      if (auto constant = std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[i])) {
+        inputIndexToLiteral_[i] = constant->value()->toString(0);
+      } else {
+        auto const inputColumnSize = asView(expr->inputs()[i]->type()).size();
+        if (outputSize_ == SIZE_MAX) {
+          outputSize_ = inputColumnSize;
+        } else {
+          VELOX_CHECK_EQ(outputSize_, inputColumnSize, "concat expects all columns to have the same size");
+        }
+      }
     }
-    if (auto constant1 = std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[1])) {
-      rhsString_ = constant1->value()->toString(0);
+    // If we didn't find ANY non-literal inputs, set the output size to 1.
+    if (outputSize_ == SIZE_MAX) {
+      outputSize_ = 1u;
     }
   }
 
@@ -1760,39 +1773,27 @@ class ConcatFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     cudf::string_scalar emptyString("");
-    std::unique_ptr<cudf::column> lhsScalarCol, rhsScalarCol;
-    cudf::table_view table;
-    if (lhsString_ && rhsString_) {
-      // Both sides are string literals. Set size to 1.
-      cudf::string_scalar lhsScalar(*lhsString_, true, stream, mr);
-      lhsScalarCol = cudf::make_column_from_scalar(lhsScalar, 1, stream, mr);
-      cudf::string_scalar rhsScalar(*rhsString_, true, stream, mr);
-      rhsScalarCol = cudf::make_column_from_scalar(rhsScalar, 1, stream, mr);
-      table = cudf::table_view({lhsScalarCol->view(), rhsScalarCol->view()});
-    } else if (lhsString_) {
-      // RHS is column, LHS is string literal. Size the LHS scalar column based on RHS column.
-      auto const size = asView(inputColumns[0]).size();
-      cudf::string_scalar lhsScalar(*lhsString_, true, stream, mr);
-      lhsScalarCol = cudf::make_column_from_scalar(lhsScalar, size, stream, mr);
-      table = cudf::table_view({lhsScalarCol->view(), asView(inputColumns[0])});
-    } else if (rhsString_) {
-      // LHS is column, RHS is string literal. Size the RHS scalar column based on LHS column.
-      auto const size = asView(inputColumns[0]).size();
-      cudf::string_scalar rhsScalar(*rhsString_, true, stream, mr);
-      rhsScalarCol = cudf::make_column_from_scalar(rhsScalar, size, stream, mr);
-      table = cudf::table_view({asView(inputColumns[0]), rhsScalarCol->view()});
-    } else {
-      // Both sides are columns. Validate they have the same size.
-      auto const size0 = asView(inputColumns[0]).size();
-      auto const size1 = asView(inputColumns[1]).size();
-      VELOX_CHECK_EQ(size0, size1, "concat expects both columns to have the same size");
-      table = cudf::table_view({asView(inputColumns[0]), asView(inputColumns[1])});
+    cudf::column columns;
+    for (size_t i = 0; i < numInputs_; ++i) {
+      auto it = inputIndexToLiteral_.find(i);
+      if (it == inputIndexToLiteral_.end()) {
+        // No literal for this input. Use the column.
+        columns.push_back(asColumn(inputColumns[i]));
+      } else {
+        // Create a column of the literal repeated for the entire output size.
+        auto const literal = it->second;
+        cudf::string_scalar scalar(literal, true, stream, mr);
+        auto col = cudf::make_column_from_scalar(scalar, outputSize_, stream, mr);
+        columns.push_back(col->view());
+      }
     }
-    return cudf::strings::concatenate(table, emptyString, emptyString, cudf::strings::separator_on_nulls::YES, stream, mr);
+    return cudf::strings::concatenate(cudf::table_view(columns), emptyString, emptyString, cudf::strings::separator_on_nulls::YES, stream, mr);
   }
 
  private:
-  std::optional<std::string> lhsString_, rhsString_;
+  std::map<int, std::string> inputIndexToLiteral_;
+  size_t numInputs_{0};
+  size_t outputSize_{SIZE_MAX};
 };
 
 bool registerCudfFunction(
