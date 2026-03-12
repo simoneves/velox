@@ -1753,18 +1753,7 @@ class ConcatFunction : public CudfFunction {
     for (size_t i = 0; i < numInputs_; ++i) {
       if (auto constant = std::dynamic_pointer_cast<ConstantExpr>(expr->inputs()[i])) {
         inputIndexToLiteral_[i] = constant->value()->toString(0);
-      } else {
-        auto const inputColumnSize = asView(expr->inputs()[i]->type()).size();
-        if (outputSize_ == SIZE_MAX) {
-          outputSize_ = inputColumnSize;
-        } else {
-          VELOX_CHECK_EQ(outputSize_, inputColumnSize, "concat expects all columns to have the same size");
-        }
       }
-    }
-    // If we didn't find ANY non-literal inputs, set the output size to 1.
-    if (outputSize_ == SIZE_MAX) {
-      outputSize_ = 1u;
     }
   }
 
@@ -1772,28 +1761,41 @@ class ConcatFunction : public CudfFunction {
       std::vector<ColumnOrView>& inputColumns,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
-    cudf::string_scalar emptyString("");
-    cudf::column columns;
+    // If there is at least one input column, fetch its size as the output size.
+    // If there are no input columns, the output size will be 1.
+    size_t outputSize = inputColumns.empty() ? 1u : asView(inputColumns[0]).size();
+    
+    // Iterate the inputs, building a vector of column views, either a literal
+    // from the map, or the next input column. We also keep a vector of the
+    // columns created for literals, so that they persist while their views
+    // are used in the concatenation.
+    std::vector<cudf::column_view> columnViews;
+    std::vector<std::unique_ptr<cudf::column>> literalColumns;
+    size_t nextInputColumnIndex = 0u;
     for (size_t i = 0; i < numInputs_; ++i) {
       auto it = inputIndexToLiteral_.find(i);
       if (it == inputIndexToLiteral_.end()) {
-        // No literal for this input. Use the column.
-        columns.push_back(asColumn(inputColumns[i]));
+        // No literal for this input. Use the next input column.
+        auto& column = inputColumns[nextInputColumnIndex++];
+        columnViews.push_back(asView(column));
       } else {
         // Create a column of the literal repeated for the entire output size.
         auto const literal = it->second;
         cudf::string_scalar scalar(literal, true, stream, mr);
-        auto col = cudf::make_column_from_scalar(scalar, outputSize_, stream, mr);
-        columns.push_back(col->view());
+        auto col = cudf::make_column_from_scalar(scalar, outputSize, stream, mr);
+        columnViews.push_back(col->view());
+        literalColumns.emplace_back(std::move(col));
       }
     }
-    return cudf::strings::concatenate(cudf::table_view(columns), emptyString, emptyString, cudf::strings::separator_on_nulls::YES, stream, mr);
+
+    // Concatenate the columns, nulls as empty strings, no separators.
+    cudf::string_scalar emptyString("");
+    return cudf::strings::concatenate(cudf::table_view(columnViews), emptyString, emptyString, cudf::strings::separator_on_nulls::YES, stream, mr);
   }
 
  private:
   std::map<int, std::string> inputIndexToLiteral_;
   size_t numInputs_{0};
-  size_t outputSize_{SIZE_MAX};
 };
 
 bool registerCudfFunction(
