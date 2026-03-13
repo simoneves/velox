@@ -411,23 +411,42 @@ class RoundFunction : public CudfFunction {
       VELOX_CHECK_NOT_NULL(scaleExpr, "round scale must be a constant");
       scale_ = scaleExpr->value()->as<SimpleVector<int32_t>>()->valueAt(0);
     }
+    isDoubleInput_ = expr->inputs()[0]->type()->kind() == TypeKind::DOUBLE;
   }
 
   ColumnOrView eval(
       std::vector<ColumnOrView>& inputColumns,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
+    if (isDoubleInput_) {
+      auto inputView = asView(inputColumns[0]);
+      auto decType = cudf::data_type{
+          cudf::type_id::DECIMAL128,
+          numeric::scale_type{-std::max(scale_ + 1, 15)}};
+      auto decCol = cudf::cast(inputView, decType, stream, mr);
+      auto rounded = cudf::round_decimal(
+          decCol->view(),
+          scale_,
+          cudf::rounding_method::HALF_UP,
+          stream,
+          mr);
+      return cudf::cast(
+          rounded->view(),
+          cudf::data_type{cudf::type_id::FLOAT64},
+          stream,
+          mr);
+    }
     return cudf::round_decimal(
         asView(inputColumns[0]),
         scale_,
         cudf::rounding_method::HALF_UP,
         stream,
         mr);
-    ;
   }
 
  private:
   int32_t scale_ = 0;
+  bool isDoubleInput_ = false;
 };
 
 class BinaryFunction : public CudfFunction {
@@ -2063,6 +2082,15 @@ bool registerBuiltinFunctions(const std::string& prefix) {
        FunctionSignatureBuilder()
            .returnType("bigint")
            .argumentType("bigint")
+           .constantArgumentType("integer")
+           .build(),
+       FunctionSignatureBuilder()
+           .returnType("double")
+           .argumentType("double")
+           .build(),
+       FunctionSignatureBuilder()
+           .returnType("double")
+           .argumentType("double")
            .constantArgumentType("integer")
            .build()});
 
