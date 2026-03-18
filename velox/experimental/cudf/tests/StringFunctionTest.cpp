@@ -155,6 +155,88 @@ TEST_F(CudfStringFunctionTest, likeInFilter) {
   assertQuery(plan, "SELECT c0, c1 FROM tmp WHERE c1 LIKE 'hel%'");
 }
 
+// ---- CONTAINS tests -------------------------------------------------------
+
+TEST_F(CudfStringFunctionTest, containsMatch) {
+  auto input = makeRowVector(
+      {makeFlatVector<std::string>({"hello world", "foobar", "abcdef"})});
+  createDuckDbTable({input});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"contains(c0, 'oo') AS result"})
+                  .planNode();
+
+  assertQuery(plan, "SELECT contains(c0, 'oo') AS result FROM tmp");
+}
+
+TEST_F(CudfStringFunctionTest, containsNoMatch) {
+  auto input = makeRowVector(
+      {makeFlatVector<std::string>({"hello", "world", "test"})});
+  createDuckDbTable({input});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"contains(c0, 'xyz') AS result"})
+                  .planNode();
+
+  assertQuery(plan, "SELECT contains(c0, 'xyz') AS result FROM tmp");
+}
+
+TEST_F(CudfStringFunctionTest, containsAtBoundaries) {
+  auto input = makeRowVector(
+      {makeFlatVector<std::string>({"prefix_mid", "mid_suffix", "mid"})});
+  createDuckDbTable({input});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"contains(c0, 'mid') AS result"})
+                  .planNode();
+
+  assertQuery(plan, "SELECT contains(c0, 'mid') AS result FROM tmp");
+}
+
+TEST_F(CudfStringFunctionTest, containsEmptyTarget) {
+  auto input = makeRowVector(
+      {makeFlatVector<std::string>({"hello", "", "world"})});
+  createDuckDbTable({input});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"contains(c0, '') AS result"})
+                  .planNode();
+
+  assertQuery(plan, "SELECT contains(c0, '') AS result FROM tmp");
+}
+
+TEST_F(CudfStringFunctionTest, containsEmptyInput) {
+  auto input =
+      makeRowVector({makeFlatVector<std::string>({"", "", ""})});
+  createDuckDbTable({input});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .project({"contains(c0, 'a') AS result"})
+                  .planNode();
+
+  assertQuery(plan, "SELECT contains(c0, 'a') AS result FROM tmp");
+}
+
+TEST_F(CudfStringFunctionTest, containsInFilter) {
+  auto input = makeRowVector(
+      {makeFlatVector<int32_t>({1, 2, 3, 4}),
+       makeFlatVector<std::string>({"apple", "banana", "grape", "mango"})});
+  createDuckDbTable({input});
+
+  auto plan = PlanBuilder()
+                  .values({input})
+                  .filter("contains(c1, 'an')")
+                  .project({"c0", "c1"})
+                  .planNode();
+
+  assertQuery(plan, "SELECT c0, c1 FROM tmp WHERE contains(c1, 'an')");
+}
+
 // ---- UPPER tests ----------------------------------------------------------
 
 TEST_F(CudfStringFunctionTest, upperBasic) {
@@ -352,6 +434,34 @@ TEST_F(CudfStringExprTest, likeExact) {
 TEST_F(CudfStringExprTest, likeSingleChar) {
   auto result = evaluateOnce<bool, std::string>("c0 LIKE 'h_llo'", "hello");
   EXPECT_TRUE(result.value());
+}
+
+TEST_F(CudfStringExprTest, containsMatch) {
+  auto result =
+      evaluateOnce<bool, std::string>("contains(c0, 'ell')", "hello");
+  EXPECT_TRUE(result.value());
+}
+
+TEST_F(CudfStringExprTest, containsNoMatch) {
+  auto result =
+      evaluateOnce<bool, std::string>("contains(c0, 'xyz')", "hello");
+  EXPECT_FALSE(result.value());
+}
+
+TEST_F(CudfStringExprTest, containsFullString) {
+  auto result =
+      evaluateOnce<bool, std::string>("contains(c0, 'hello')", "hello");
+  EXPECT_TRUE(result.value());
+}
+
+TEST_F(CudfStringExprTest, containsEmpty) {
+  auto result = evaluateOnce<bool, std::string>("contains(c0, '')", "hello");
+  EXPECT_TRUE(result.value());
+}
+
+TEST_F(CudfStringExprTest, containsEmptyInput) {
+  auto result = evaluateOnce<bool, std::string>("contains(c0, 'a')", "");
+  EXPECT_FALSE(result.value());
 }
 
 TEST_F(CudfStringExprTest, upperBasic) {
