@@ -1059,6 +1059,17 @@ bool registerBuiltinFunctions(const std::string& prefix) {
            .build()});
 
   registerCudfFunction(
+      prefix + "contains",
+      [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
+        return std::make_shared<ContainsFunction>(expr);
+      },
+      {FunctionSignatureBuilder()
+           .returnType("boolean")
+           .argumentType("varchar")
+           .constantArgumentType("varchar")
+           .build()});
+
+  registerCudfFunction(
       prefix + "concat",
       [](const std::string&, const std::shared_ptr<velox::exec::Expr>& expr) {
         return std::make_shared<ConcatFunction>(expr);
