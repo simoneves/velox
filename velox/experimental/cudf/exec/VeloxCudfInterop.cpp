@@ -158,32 +158,28 @@ std::unique_ptr<cudf::table> toCudfTable(
 namespace {
 
 void setArrowFormatBackToVarbinary(ArrowSchema* schema, const TypePtr& type) {
-  switch (type->kind()) {
-    case TypeKind::ROW: {
-      if (schema->n_children != static_cast<int64_t>(type->size())) {
-        break;
-      }
-      for (size_t i = 0; i < type->size(); ++i) {
-        setArrowFormatBackToVarbinary(schema->children[i], type->childAt(i));
-      }
-      break;
-    }
-    case TypeKind::VARBINARY: {
-      // Replace any format string with "z" to indicate VARBINARY.
+  // Check for the specific case of a ROW<VARBINARY> type and a corresponding
+  // Arrow schema with a single child with format "u" (Arrow UTF-8 string).
+  // If this is the case, change the format back to "z" so that the data type
+  // matches for the re-import.
+  if (type->kind() == TypeKind::ROW) {
+    auto const row = std::dynamic_pointer_cast<const RowType>(type);
+    if (row->size() == 1 &&
+        row->childAt(0)->kind() == TypeKind::VARBINARY &&
+        schema->n_children == 1 &&
+        schema->children[0]->format != nullptr &&
+        strcmp(schema->children[0]->format, "u") == 0) {
+      // Free existing format string.
+      std::free(const_cast<char*>(schema->format));
+      schema->format = nullptr;
+      // Set new format string as "z" (VARBINARY).
       static constexpr const char* kVarbinaryArrowFormat = "z";
-      if (schema->format != nullptr) {
-        std::free(const_cast<char*>(schema->format));
-        schema->format = nullptr;
-      }
       const size_t bufferLen = std::strlen(kVarbinaryArrowFormat) + 1;
       auto* buffer = static_cast<char*>(std::malloc(bufferLen));
       VELOX_CHECK_NOT_NULL(buffer);
       std::memcpy(buffer, kVarbinaryArrowFormat, bufferLen);
       schema->format = buffer;
-      break;
     }
-    default:
-      break;
   }
 }
 
