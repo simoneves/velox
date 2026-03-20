@@ -171,8 +171,8 @@ TEST_F(CudfStringFunctionTest, containsMatch) {
 }
 
 TEST_F(CudfStringFunctionTest, containsNoMatch) {
-  auto input = makeRowVector(
-      {makeFlatVector<std::string>({"hello", "world", "test"})});
+  auto input =
+      makeRowVector({makeFlatVector<std::string>({"hello", "world", "test"})});
   createDuckDbTable({input});
 
   auto plan = PlanBuilder()
@@ -197,8 +197,8 @@ TEST_F(CudfStringFunctionTest, containsAtBoundaries) {
 }
 
 TEST_F(CudfStringFunctionTest, containsEmptyTarget) {
-  auto input = makeRowVector(
-      {makeFlatVector<std::string>({"hello", "", "world"})});
+  auto input =
+      makeRowVector({makeFlatVector<std::string>({"hello", "", "world"})});
   createDuckDbTable({input});
 
   auto plan = PlanBuilder()
@@ -210,8 +210,7 @@ TEST_F(CudfStringFunctionTest, containsEmptyTarget) {
 }
 
 TEST_F(CudfStringFunctionTest, containsEmptyInput) {
-  auto input =
-      makeRowVector({makeFlatVector<std::string>({"", "", ""})});
+  auto input = makeRowVector({makeFlatVector<std::string>({"", "", ""})});
   createDuckDbTable({input});
 
   auto plan = PlanBuilder()
@@ -437,14 +436,12 @@ TEST_F(CudfStringExprTest, likeSingleChar) {
 }
 
 TEST_F(CudfStringExprTest, containsMatch) {
-  auto result =
-      evaluateOnce<bool, std::string>("contains(c0, 'ell')", "hello");
+  auto result = evaluateOnce<bool, std::string>("contains(c0, 'ell')", "hello");
   EXPECT_TRUE(result.value());
 }
 
 TEST_F(CudfStringExprTest, containsNoMatch) {
-  auto result =
-      evaluateOnce<bool, std::string>("contains(c0, 'xyz')", "hello");
+  auto result = evaluateOnce<bool, std::string>("contains(c0, 'xyz')", "hello");
   EXPECT_FALSE(result.value());
 }
 
