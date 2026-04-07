@@ -40,6 +40,8 @@ bool containsDecimalTypeRecursive(
 bool containsDecimalType(
     const std::shared_ptr<velox::exec::Expr>& expr,
     const bool deep) {
+  // HACK! pretend there aren't any decimals
+  return false;
   // check output type
   if (isOfDecimalType(expr)) {
     return true;

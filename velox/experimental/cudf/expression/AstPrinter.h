@@ -245,8 +245,8 @@ class expression_printer {
    * @param os Output stream to write to
    * @param indent_str String to use for each level of indentation
    */
-  explicit expression_printer(std::ostream& os, std::string indent_str = "  ")
-      : _os(os), _indent_str(std::move(indent_str)) {}
+  explicit expression_printer(std::ostream& os, table_view const& input_table_view, std::string indent_str = "  ")
+      : _os(os), _input_table_view(input_table_view), _indent_str(std::move(indent_str)) {}
 
   /**
    * @brief Visit and print an expression tree
@@ -294,6 +294,7 @@ class expression_printer {
 
  private:
   std::ostream& _os;
+  table_view const& _input_table_view;
   std::string _indent_str;
   int _node_index = 0;
 
@@ -328,6 +329,10 @@ class expression_printer {
     print_indent(depth + 1);
     _os << "table_source: "
         << table_reference_to_string(expr.get_table_source()) << "\n";
+
+    print_indent(depth + 1);
+    _os << "type: "
+        << type_id_to_string(expr.get_data_type(_input_table_view).id()) << ", scale " << expr.get_data_type(_input_table_view).scale() << "\n";
   }
 
   void visit_operation(operation const& expr, int index, int depth) {
@@ -373,10 +378,11 @@ class expression_printer {
  */
 inline void print_expression(
     expression const& expr,
-    std::ostream& os = std::cout,
+    std::ostream& os,
+    table_view const& input_table_view,
     std::string const& indent_str = "  ") {
   os << "=== AST Expression Tree ===\n";
-  expression_printer printer(os, indent_str);
+  expression_printer printer(os, input_table_view, indent_str);
   printer.visit(expr);
   os << "=== Total nodes: " << printer.node_count() << " ===\n";
 }
@@ -390,9 +396,10 @@ inline void print_expression(
  */
 inline std::string expression_to_string(
     expression const& expr,
+    table_view const& input_table_view,
     std::string const& indent_str = "  ") {
   std::ostringstream oss;
-  print_expression(expr, oss, indent_str);
+  print_expression(expr, oss, input_table_view, indent_str);
   return oss.str();
 }
 

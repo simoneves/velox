@@ -15,6 +15,7 @@
  */
 #include "velox/experimental/cudf/expression/AstExpressionUtils.h"
 #include "velox/experimental/cudf/expression/JitExpression.h"
+#include "velox/experimental/cudf/expression/AstPrinter.h"
 
 namespace facebook::velox::cudf_velox {
 
@@ -25,6 +26,22 @@ JitExpression::JitExpression(
 
 void JitExpression::close() {
   expr_.close();
+}
+
+void log_int64_t_column_view_to_stdout(const cudf::column_view& view) {
+  std::cout << "  Type: " << cudf::ast::type_id_to_string(view.type().id()) << ", scale: " << view.type().scale() << std::endl;
+  if (view.type().id() != cudf::type_id::DECIMAL64) {
+    std::cout << "  Not an DECIMAL64 column view, cannot log values" << std::endl;
+    return;
+  }
+  auto n = view.size();
+  std::vector<int64_t> host(n);
+  auto const* d = static_cast<int64_t const*>(view.head<int64_t>());
+  cudaMemcpy(host.data(), d, n * sizeof(int64_t), cudaMemcpyDeviceToHost);
+  std::cout << "  Raw values:" << std::endl;
+  for (cudf::size_type i = 0; i < n; ++i) {
+    std::cout << "    [" << i << "] = " << host[i] << std::endl;
+  }
 }
 
 ColumnOrView JitExpression::eval(
@@ -60,6 +77,8 @@ ColumnOrView JitExpression::eval(
             precomputedColumns[columnIndex - inputColumnViews.size()]);
       }
     } else {
+      std::cout << cudf::ast::expression_to_string(expr_.cudfTree_.back(), astInputTableView)
+                << std::endl;
       return cudf::compute_column_jit(
           astInputTableView, expr_.cudfTree_.back(), stream, mr);
     }
@@ -67,11 +86,18 @@ ColumnOrView JitExpression::eval(
   if (finalize) {
     const auto requestedType =
         cudf_velox::veloxToCudfDataType(expr_.expr_->type());
+    std::cout << "Initial result:" << std::endl;
+    log_int64_t_column_view_to_stdout(asView(result));
+    std::cout << "Finalizing, requested type is " << cudf::ast::type_id_to_string(requestedType.id()) << ", scale " << requestedType.scale() << std::endl;
     auto resultView = asView(result);
     if (resultView.type() != requestedType) {
       result = cudf::cast(resultView, requestedType, stream, mr);
     }
+  } else {
+    std::cout << "Not finalizing" << std::endl;
   }
+  std::cout << "Final result:" << std::endl;
+  log_int64_t_column_view_to_stdout(asView(result));
   return result;
 }
 
