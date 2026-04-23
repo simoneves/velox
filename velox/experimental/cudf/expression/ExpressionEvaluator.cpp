@@ -16,7 +16,6 @@
 #include "velox/experimental/cudf/exec/Validation.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 #include "velox/experimental/cudf/expression/AstUtils.h"
-#include "velox/experimental/cudf/expression/DecimalExpressionKernels.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/expression/NullMask.h"
 
@@ -40,6 +39,7 @@
 #include <cudf/column/column_factories.hpp>
 #include <cudf/copying.hpp>
 #include <cudf/datetime.hpp>
+#include <cudf/decimal/decimal_ops.hpp>
 #include <cudf/fixed_point/fixed_point.hpp>
 #include <cudf/hashing.hpp>
 #include <cudf/lists/count_elements.hpp>
@@ -575,11 +575,8 @@ class BinaryFunction : public CudfFunction {
             rhsView = rhsCast->view();
           }
         }
-        auto lhsScale = -lhsView.type().scale();
-        auto rhsScale = -rhsView.type().scale();
-        auto outScale = -type_.scale();
-        auto aRescale = outScale - lhsScale + rhsScale;
-        return decimalDivide(lhsView, rhsView, type_, aRescale, stream, mr);
+        return cudf::divide_decimal(
+            lhsView, rhsView, numeric::decimal_rounding_mode::HALF_UP, stream, mr);
       }
       auto lhsView = asView(inputColumns[0]);
       auto rhsView = asView(inputColumns[1]);
@@ -655,11 +652,8 @@ class BinaryFunction : public CudfFunction {
           VELOX_USER_FAIL("Division by zero");
         }
         auto lhsView = asView(inputColumns[0]);
-        auto lhsScale = -lhsView.type().scale();
-        auto rhsScale = -right_->type().scale();
-        auto outScale = -type_.scale();
-        auto aRescale = outScale - lhsScale + rhsScale;
-        return decimalDivide(lhsView, *right_, type_, aRescale, stream, mr);
+        return cudf::divide_decimal(
+            lhsView, *right_, numeric::decimal_rounding_mode::HALF_UP, stream, mr);
       }
       auto lhsView = asView(inputColumns[0]);
       if (isComparisonOp(op_) && cudf::is_fixed_point(lhsView.type()) &&
@@ -732,11 +726,8 @@ class BinaryFunction : public CudfFunction {
     }
     if (op_ == cudf::binary_operator::DIV && cudf::is_fixed_point(type_)) {
       auto rhsView = asView(inputColumns[0]);
-      auto lhsScale = -left_->type().scale();
-      auto rhsScale = -rhsView.type().scale();
-      auto outScale = -type_.scale();
-      auto aRescale = outScale - lhsScale + rhsScale;
-      return decimalDivide(*left_, rhsView, type_, aRescale, stream, mr);
+      return cudf::divide_decimal(
+          *left_, rhsView, numeric::decimal_rounding_mode::HALF_UP, stream, mr);
     }
     auto rhsView = asView(inputColumns[0]);
     if (isComparisonOp(op_) && cudf::is_fixed_point(left_->type()) &&
