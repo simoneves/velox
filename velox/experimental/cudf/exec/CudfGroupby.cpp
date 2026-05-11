@@ -95,10 +95,9 @@ DEFINE_SIMPLE_GROUPBY_AGGREGATOR(Max, max, MAX)
 // logic around handling the encoded decimal sum state with count in
 // intermediate and final aggregation steps. One function is unique in each
 // case, but is kept as a function to keep the main classes simpler. Note that
-// unlike other aggregator implementations, this class hold state (the decoded
-// sum and count columns) since they are needed across both addGroupbyRequest
-// and makeOutputColumn. This should not be an issue for now, but may need
-// reconsideration in the future.
+// unlike other aggregator implementations, this class holds state (the decoded
+// sum and count columns, to guarantee a lifetime constraint). This should not
+// be an issue for now, but may need reconsideration in the future.
 struct GroupbyDecimalSumAvgAggregatorBase : GroupbyAggregator {
   GroupbyDecimalSumAvgAggregatorBase(
       core::AggregationNode::Step step,
@@ -131,11 +130,17 @@ struct GroupbyDecimalSumAvgAggregatorBase : GroupbyAggregator {
         cudf::make_sum_aggregation<cudf::groupby_aggregation>());
   }
 
+  void validateColumnType(cudf::column_view const& column) {
+    VELOX_CHECK(
+        column.type().id() == cudf::type_id::STRING,
+        "Expected serialized decimal aggregation state: Velox VARBINARY represented as cuDF STRING");
+  }
+
   void addDecimalIntermediateSumCountRequests(
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
       rmm::cuda_stream_view stream) {
-    VELOX_CHECK(tbl.column(inputIndex).type().id() == cudf::type_id::STRING);
+    validateColumnType(tbl.column(inputIndex));
     auto scale = resultType->isDecimal()
         ? getDecimalPrecisionScale(*resultType).second
         : 0;
@@ -147,7 +152,7 @@ struct GroupbyDecimalSumAvgAggregatorBase : GroupbyAggregator {
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
       rmm::cuda_stream_view stream) {
-    VELOX_CHECK(tbl.column(inputIndex).type().id() == cudf::type_id::STRING);
+    validateColumnType(tbl.column(inputIndex));
     auto scale = getDecimalPrecisionScale(*resultType).second;
     addDecimalSumCountRequestsAfterDecode(
         tbl.column(inputIndex), scale, requests, stream);
@@ -157,7 +162,7 @@ struct GroupbyDecimalSumAvgAggregatorBase : GroupbyAggregator {
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
       rmm::cuda_stream_view stream) {
-    VELOX_CHECK(tbl.column(inputIndex).type().id() == cudf::type_id::STRING);
+    validateColumnType(tbl.column(inputIndex));
     auto scale = getDecimalPrecisionScale(*resultType).second;
     auto& request = requests.emplace_back();
     sumIdx_ = requests.size() - 1;
