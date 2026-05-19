@@ -44,12 +44,14 @@ DecimalSumStateColumns deserializeDecimalSumState(
         cudf::data_type{cudf::type_id::DECIMAL128, -scale},
         0,
         cudf::mask_state::UNALLOCATED,
-        stream);
+        stream,
+        mr);
     empty.count = cudf::make_fixed_width_column(
         cudf::data_type{cudf::type_id::INT64},
         0,
         cudf::mask_state::UNALLOCATED,
-        stream);
+        stream,
+        mr);
     return empty;
   }
 
@@ -61,12 +63,14 @@ DecimalSumStateColumns deserializeDecimalSumState(
         cudf::data_type{cudf::type_id::DECIMAL128, -scale},
         numRows,
         cudf::mask_state::ALL_NULL,
-        stream);
+        stream,
+        mr);
     allNull.count = cudf::make_fixed_width_column(
         cudf::data_type{cudf::type_id::INT64},
         numRows,
         cudf::mask_state::ALL_NULL,
-        stream);
+        stream,
+        mr);
     return allNull;
   }
 
@@ -81,12 +85,14 @@ DecimalSumStateColumns deserializeDecimalSumState(
       cudf::data_type{cudf::type_id::DECIMAL128, -scale},
       numRows,
       cudf::mask_state::UNALLOCATED,
-      stream);
+      stream,
+      mr);
   auto countCol = cudf::make_fixed_width_column(
       cudf::data_type{cudf::type_id::INT64},
       numRows,
       cudf::mask_state::UNALLOCATED,
-      stream);
+      stream,
+      mr);
 
   auto sumView = sumCol->mutable_view();
   auto countView = countCol->mutable_view();
@@ -165,11 +171,12 @@ std::unique_ptr<cudf::column> serializeDecimalSumState(
       cudf::data_type{offsetsType},
       numRows + 1,
       cudf::mask_state::UNALLOCATED,
-      stream);
+      stream,
+      mr);
   auto offsetsView = offsetsCol->mutable_view();
 
   rmm::device_buffer charsBuf(
-      static_cast<size_t>(numRows) * detail::kDecimalSumStateSize, stream);
+      static_cast<size_t>(numRows) * detail::kDecimalSumStateSize, stream, mr);
 
   detail::fillOffsetsForDecimalSumState(
       useLargeOffsets,
@@ -236,7 +243,7 @@ std::unique_ptr<cudf::column> computeDecimalAverage(
 
   auto numRows = sumCol.size();
   auto out = cudf::make_fixed_width_column(
-      sumCol.type(), numRows, cudf::mask_state::UNALLOCATED, stream);
+      sumCol.type(), numRows, cudf::mask_state::UNALLOCATED, stream, mr);
 
   if (numRows > 0) {
     auto const rowCount = static_cast<int32_t>(numRows);
