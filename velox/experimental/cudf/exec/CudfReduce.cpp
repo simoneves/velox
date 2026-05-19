@@ -837,7 +837,7 @@ CudfVectorPtr CudfReduce::doGlobalAggregation(
   for (auto i = 0; i < aggregators_.size(); i++) {
     resultColumns.push_back(
         aggregators_[i]->doReduce(
-            tableView, outputType_->childAt(i), stream, mr, numInputRows_);
+            tableView, outputType_->childAt(i), stream, mr, numInputRows_));
   }
 
   return std::make_shared<cudf_velox::CudfVector>(
