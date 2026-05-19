@@ -18,6 +18,8 @@
 #include "velox/experimental/cudf/exec/CudfAggregation.h"
 #include "velox/experimental/cudf/exec/CudfOperator.h"
 
+#include <rmm/resource_ref.hpp>
+
 namespace facebook::velox::cudf_velox {
 
 struct ReduceAggregator {
@@ -30,6 +32,7 @@ struct ReduceAggregator {
       cudf::table_view const& input,
       TypePtr const& outputType,
       rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr,
       vector_size_t inputRowCount) = 0;
 
   virtual ~ReduceAggregator() = default;
@@ -91,7 +94,8 @@ class CudfReduce : public CudfOperatorBase {
  private:
   CudfVectorPtr doGlobalAggregation(
       cudf::table_view tableView,
-      rmm::cuda_stream_view stream);
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr);
 
   std::shared_ptr<const core::AggregationNode> aggregationNode_;
   std::vector<std::unique_ptr<ReduceAggregator>> aggregators_;
