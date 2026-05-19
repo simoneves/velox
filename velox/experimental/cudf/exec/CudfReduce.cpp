@@ -64,7 +64,7 @@ using facebook::velox::cudf_velox::validateIntermediateColumnType;
         cudf::table_view const& input,                                         \
         TypePtr const& outputType,                                             \
         rmm::cuda_stream_view stream,                                          \
-        rmm::device_async_resource_ref mr,                                      \
+        rmm::device_async_resource_ref mr,                                     \
         vector_size_t /*inputRowCount*/) override {                            \
       auto const aggRequest =                                                  \
           cudf::make_##name##_aggregation<cudf::reduce_aggregation>();         \
@@ -75,8 +75,7 @@ using facebook::velox::cudf_velox::validateIntermediateColumnType;
           cudfOutputType,                                                      \
           stream,                                                              \
           get_temp_mr());                                                      \
-      return cudf::make_column_from_scalar(                                    \
-          *resultScalar, 1, stream, mr);                          \
+      return cudf::make_column_from_scalar(*resultScalar, 1, stream, mr);      \
     }                                                                          \
   };
 
@@ -124,8 +123,7 @@ struct ReduceCountAggregator : ReduceAggregator {
       auto resultScalar =
           cudf::numeric_scalar<int64_t>(count, true, stream, get_temp_mr());
 
-      return cudf::make_column_from_scalar(
-          resultScalar, 1, stream, mr);
+      return cudf::make_column_from_scalar(resultScalar, 1, stream, mr);
     } else {
       // For non-raw input (intermediate/final), use sum aggregation
       auto const aggRequest =
@@ -138,8 +136,7 @@ struct ReduceCountAggregator : ReduceAggregator {
           stream,
           get_temp_mr());
       resultScalar->set_valid_async(true, stream);
-      return cudf::make_column_from_scalar(
-          *resultScalar, 1, stream, mr);
+      return cudf::make_column_from_scalar(*resultScalar, 1, stream, mr);
     }
   }
 
@@ -172,8 +169,7 @@ struct ReduceMeanAggregator : ReduceAggregator {
             cudfOutputType,
             stream,
             get_temp_mr());
-        return cudf::make_column_from_scalar(
-            *resultScalar, 1, stream, mr);
+        return cudf::make_column_from_scalar(*resultScalar, 1, stream, mr);
       }
       case core::AggregationNode::Step::kPartial: {
         VELOX_CHECK(outputType->isRow());
@@ -192,8 +188,8 @@ struct ReduceMeanAggregator : ReduceAggregator {
             cudfSumType,
             stream,
             get_temp_mr());
-        auto sumCol = cudf::make_column_from_scalar(
-            *sumResultScalar, 1, stream, mr);
+        auto sumCol =
+            cudf::make_column_from_scalar(*sumResultScalar, 1, stream, mr);
 
         // libcudf doesn't have a count agg for reduce. What we want is to
         // count the number of valid rows.
@@ -230,8 +226,8 @@ struct ReduceMeanAggregator : ReduceAggregator {
             cudf::make_sum_aggregation<cudf::reduce_aggregation>();
         auto const sumResultScalar = cudf::reduce(
             sumCol, *sumAggRequest, sumCol.type(), stream, get_temp_mr());
-        auto sumResultCol = cudf::make_column_from_scalar(
-            *sumResultScalar, 1, stream, mr);
+        auto sumResultCol =
+            cudf::make_column_from_scalar(*sumResultScalar, 1, stream, mr);
 
         // sum the counts
         auto const countAggRequest =
@@ -270,10 +266,8 @@ std::unique_ptr<cudf::column> partialDecimalSumCountToSerializedString(
       cudf::data_type{cudf::type_id::INT64},
       stream,
       get_temp_mr());
-  auto sumCol =
-      cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
-  auto countCol =
-      cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
+  auto sumCol = cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
+  auto countCol = cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
   return serializeDecimalPartialOrIntermediateState(
       std::move(sumCol), std::move(countCol), stream, mr);
 }
@@ -284,8 +278,8 @@ std::unique_ptr<cudf::column> intermediateDecimalMergeSerializedString(
     rmm::cuda_stream_view stream,
     rmm::device_async_resource_ref mr) {
   auto const sumAgg = cudf::make_sum_aggregation<cudf::reduce_aggregation>();
-  auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      inputCol, scale, stream, mr);
+  auto sumAndCount =
+      cudf_velox::deserializeDecimalSumState(inputCol, scale, stream, mr);
   auto sumScalar = cudf::reduce(
       sumAndCount.sum->view(),
       *sumAgg,
@@ -298,10 +292,8 @@ std::unique_ptr<cudf::column> intermediateDecimalMergeSerializedString(
       cudf::data_type{cudf::type_id::INT64},
       stream,
       get_temp_mr());
-  auto sumCol =
-      cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
-  auto countCol =
-      cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
+  auto sumCol = cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
+  auto countCol = cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
   return serializeDecimalPartialOrIntermediateState(
       std::move(sumCol), std::move(countCol), stream, mr);
 }
@@ -313,8 +305,8 @@ std::unique_ptr<cudf::column> finalDecimalAvgFromSerializedString(
     rmm::cuda_stream_view stream,
     rmm::device_async_resource_ref mr) {
   auto const sumAgg = cudf::make_sum_aggregation<cudf::reduce_aggregation>();
-  auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      inputCol, scale, stream, mr);
+  auto sumAndCount =
+      cudf_velox::deserializeDecimalSumState(inputCol, scale, stream, mr);
   auto sumScalar = cudf::reduce(
       sumAndCount.sum->view(),
       *sumAgg,
@@ -327,10 +319,8 @@ std::unique_ptr<cudf::column> finalDecimalAvgFromSerializedString(
       cudf::data_type{cudf::type_id::INT64},
       stream,
       get_temp_mr());
-  auto sumCol =
-      cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
-  auto countCol =
-      cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
+  auto sumCol = cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
+  auto countCol = cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
   return finalizeDecimalAverage(
       std::move(sumCol), std::move(countCol), resultType, stream, mr);
 }
@@ -351,10 +341,8 @@ std::unique_ptr<cudf::column> singleDecimalAvgFromRawColumn(
       cudf::data_type{cudf::type_id::INT64},
       stream,
       get_temp_mr());
-  auto sumCol =
-      cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
-  auto countCol =
-      cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
+  auto sumCol = cudf::make_column_from_scalar(*sumScalar, 1, stream, mr);
+  auto countCol = cudf::make_column_from_scalar(*countScalar, 1, stream, mr);
   return finalizeDecimalAverage(
       std::move(sumCol), std::move(countCol), resultType, stream, mr);
 }
@@ -373,8 +361,7 @@ std::unique_ptr<cudf::column> singleOrRawDecimalSumWithCast(
   }
   auto const resultScalar =
       cudf::reduce(inputCol, *sumAgg, cudfOutType, stream, get_temp_mr());
-  return cudf::make_column_from_scalar(
-      *resultScalar, 1, stream, mr);
+  return cudf::make_column_from_scalar(*resultScalar, 1, stream, mr);
 }
 
 std::unique_ptr<cudf::column> reduceIntermediateDecimalFromSerializedColumn(
@@ -397,8 +384,8 @@ std::unique_ptr<cudf::column> reduceFinalDecimalSumFromSerializedColumn(
     rmm::device_async_resource_ref mr) {
   validateIntermediateColumnType(inputCol);
   auto scale = getDecimalPrecisionScale(*outputType).second;
-  auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      inputCol, scale, stream, mr);
+  auto sumAndCount =
+      cudf_velox::deserializeDecimalSumState(inputCol, scale, stream, mr);
   return singleOrRawDecimalSumWithCast(
       sumAndCount.sum->view(), outputType, stream, mr);
 }
@@ -879,8 +866,8 @@ RowVectorPtr CudfReduce::doGetOutput() {
   auto stream = cudfGlobalStreamPool().get_stream();
   auto const outputMr = get_output_mr();
 
-  auto tbl = getConcatenatedTable(
-      std::move(inputs_), inputType_, stream, outputMr);
+  auto tbl =
+      getConcatenatedTable(std::move(inputs_), inputType_, stream, outputMr);
 
   // Release input data after synchronizing.
   stream.synchronize();
