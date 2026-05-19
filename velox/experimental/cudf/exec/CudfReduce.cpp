@@ -271,7 +271,7 @@ std::unique_ptr<cudf::column> partialDecimalSumCountToSerializedString(
   auto countCol =
       cudf::make_column_from_scalar(*countScalar, 1, stream, get_output_mr());
   return serializeDecimalPartialOrIntermediateState(
-      std::move(sumCol), std::move(countCol), stream);
+      std::move(sumCol), std::move(countCol), stream, get_output_mr());
 }
 
 std::unique_ptr<cudf::column> intermediateDecimalMergeSerializedString(
@@ -298,7 +298,7 @@ std::unique_ptr<cudf::column> intermediateDecimalMergeSerializedString(
   auto countCol =
       cudf::make_column_from_scalar(*countScalar, 1, stream, get_output_mr());
   return serializeDecimalPartialOrIntermediateState(
-      std::move(sumCol), std::move(countCol), stream);
+      std::move(sumCol), std::move(countCol), stream, get_output_mr());
 }
 
 std::unique_ptr<cudf::column> finalDecimalAvgFromSerializedString(
@@ -326,7 +326,7 @@ std::unique_ptr<cudf::column> finalDecimalAvgFromSerializedString(
   auto countCol =
       cudf::make_column_from_scalar(*countScalar, 1, stream, get_output_mr());
   return finalizeDecimalAverage(
-      std::move(sumCol), std::move(countCol), resultType, stream);
+      std::move(sumCol), std::move(countCol), resultType, stream, get_output_mr());
 }
 
 std::unique_ptr<cudf::column> singleDecimalAvgFromRawColumn(
@@ -349,7 +349,7 @@ std::unique_ptr<cudf::column> singleDecimalAvgFromRawColumn(
   auto countCol =
       cudf::make_column_from_scalar(*countScalar, 1, stream, get_output_mr());
   return finalizeDecimalAverage(
-      std::move(sumCol), std::move(countCol), resultType, stream);
+      std::move(sumCol), std::move(countCol), resultType, stream, get_output_mr());
 }
 
 std::unique_ptr<cudf::column> singleOrRawDecimalSumWithCast(

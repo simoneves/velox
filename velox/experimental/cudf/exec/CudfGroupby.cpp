@@ -111,7 +111,7 @@ void addDecimalSumCountRequestsAfterDecode(
     std::unique_ptr<cudf::column>& decodedSum,
     std::unique_ptr<cudf::column>& decodedCount) {
   auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      encodedColumn, scale, stream, cudf_velox::get_output_mr());
+      encodedColumn, scale, stream, get_output_mr());
   decodedSum.swap(sumAndCount.sum);
   decodedCount.swap(sumAndCount.count);
 
@@ -190,7 +190,7 @@ void addDecimalFinalSumOnlyRequest(
   auto& request = requests.emplace_back();
   sumIdx = requests.size() - 1;
   auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      tbl.column(inputIndex), scale, stream, cudf_velox::get_output_mr());
+      tbl.column(inputIndex), scale, stream, get_output_mr());
   decodedSum.swap(sumAndCount.sum);
   request.values = decodedSum->view();
   request.aggregations.push_back(
@@ -258,16 +258,16 @@ struct GroupbyDecimalSumAggregator : GroupbyAggregator {
     if (step == core::AggregationNode::Step::kPartial) {
       auto count = std::move(results[sumIdx_].results[1]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, get_output_mr());
     }
     if (step == core::AggregationNode::Step::kIntermediate) {
       auto count = std::move(results[countIdx_].results[0]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, get_output_mr());
     }
     auto const cudfResType = cudf_velox::veloxToCudfDataType(resultType);
     if (col->type() != cudfResType) {
-      col = cudf::cast(*col, cudfResType, stream, cudf_velox::get_output_mr());
+      col = cudf::cast(*col, cudfResType, stream, get_output_mr());
     }
     return col;
   }
@@ -331,26 +331,26 @@ struct GroupbyDecimalAvgAggregator : GroupbyAggregator {
     if (step == core::AggregationNode::Step::kSingle) {
       auto count = std::move(results[sumIdx_].results[1]);
       return finalizeDecimalAverage(
-          std::move(col), std::move(count), resultType, stream);
+          std::move(col), std::move(count), resultType, stream, get_output_mr());
     }
     if (step == core::AggregationNode::Step::kPartial) {
       auto count = std::move(results[sumIdx_].results[1]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, get_output_mr());
     }
     if (step == core::AggregationNode::Step::kIntermediate) {
       auto count = std::move(results[countIdx_].results[0]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, get_output_mr());
     }
     if (step == core::AggregationNode::Step::kFinal) {
       auto count = std::move(results[countIdx_].results[0]);
       return finalizeDecimalAverage(
-          std::move(col), std::move(count), resultType, stream);
+          std::move(col), std::move(count), resultType, stream, get_output_mr());
     }
     auto const cudfResType = cudf_velox::veloxToCudfDataType(resultType);
     if (col->type() != cudfResType) {
-      col = cudf::cast(*col, cudfResType, stream, cudf_velox::get_output_mr());
+      col = cudf::cast(*col, cudfResType, stream, get_output_mr());
     }
     return col;
   }
