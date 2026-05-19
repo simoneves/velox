@@ -62,7 +62,8 @@ using cudf_velox::validateIntermediateColumnType;
     void addGroupbyRequest(                                              \
         cudf::table_view const& tbl,                                     \
         std::vector<cudf::groupby::aggregation_request>& requests,       \
-        rmm::cuda_stream_view stream) override {                         \
+        rmm::cuda_stream_view stream,                                    \
+        rmm::device_async_resource_ref mr) override {                    \
       VELOX_CHECK(                                                       \
           constant == nullptr,                                           \
           #Name "Aggregator does not yet support constant input");       \
@@ -75,11 +76,12 @@ using cudf_velox::validateIntermediateColumnType;
                                                                          \
     std::unique_ptr<cudf::column> makeOutputColumn(                      \
         std::vector<cudf::groupby::aggregation_result>& results,         \
-        rmm::cuda_stream_view stream) override {                         \
+        rmm::cuda_stream_view stream,                                    \
+        rmm::device_async_resource_ref mr) override {                    \
       auto col = std::move(results[output_idx].results[0]);              \
       const auto cudfType = cudf_velox::veloxToCudfDataType(resultType); \
       if (col->type() != cudfType) {                                     \
-        col = cudf::cast(*col, cudfType, stream, get_output_mr());       \
+        col = cudf::cast(*col, cudfType, stream, mr);                    \
       }                                                                  \
       return col;                                                        \
     }                                                                    \
@@ -106,12 +108,13 @@ void addDecimalSumCountRequestsAfterDecode(
     int32_t scale,
     std::vector<cudf::groupby::aggregation_request>& requests,
     rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr,
     uint32_t& sumIdx,
     uint32_t& countIdx,
     std::unique_ptr<cudf::column>& decodedSum,
     std::unique_ptr<cudf::column>& decodedCount) {
-  auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      encodedColumn, scale, stream, cudf_velox::get_output_mr());
+  auto sumAndCount =
+      cudf_velox::deserializeDecimalSumState(encodedColumn, scale, stream, mr);
   decodedSum.swap(sumAndCount.sum);
   decodedCount.swap(sumAndCount.count);
 
@@ -134,6 +137,7 @@ void addDecimalIntermediateSumCountRequests(
     const TypePtr& resultType,
     std::vector<cudf::groupby::aggregation_request>& requests,
     rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr,
     uint32_t& sumIdx,
     uint32_t& countIdx,
     std::unique_ptr<cudf::column>& decodedSum,
@@ -148,6 +152,7 @@ void addDecimalIntermediateSumCountRequests(
       scale,
       requests,
       stream,
+      mr,
       sumIdx,
       countIdx,
       decodedSum,
@@ -160,6 +165,7 @@ void addDecimalFinalAvgSumCountRequests(
     const TypePtr& resultType,
     std::vector<cudf::groupby::aggregation_request>& requests,
     rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr,
     uint32_t& sumIdx,
     uint32_t& countIdx,
     std::unique_ptr<cudf::column>& decodedSum,
@@ -171,6 +177,7 @@ void addDecimalFinalAvgSumCountRequests(
       scale,
       requests,
       stream,
+      mr,
       sumIdx,
       countIdx,
       decodedSum,
@@ -183,6 +190,7 @@ void addDecimalFinalSumOnlyRequest(
     const TypePtr& resultType,
     std::vector<cudf::groupby::aggregation_request>& requests,
     rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr,
     uint32_t& sumIdx,
     std::unique_ptr<cudf::column>& decodedSum) {
   validateIntermediateColumnType(tbl.column(inputIndex));
@@ -190,7 +198,7 @@ void addDecimalFinalSumOnlyRequest(
   auto& request = requests.emplace_back();
   sumIdx = requests.size() - 1;
   auto sumAndCount = cudf_velox::deserializeDecimalSumState(
-      tbl.column(inputIndex), scale, stream, cudf_velox::get_output_mr());
+      tbl.column(inputIndex), scale, stream, mr);
   decodedSum.swap(sumAndCount.sum);
   request.values = decodedSum->view();
   request.aggregations.push_back(
@@ -226,7 +234,8 @@ struct GroupbyDecimalSumAggregator : GroupbyAggregator {
   void addGroupbyRequest(
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     if (step == core::AggregationNode::Step::kIntermediate) {
       addDecimalIntermediateSumCountRequests(
           tbl,
@@ -234,13 +243,21 @@ struct GroupbyDecimalSumAggregator : GroupbyAggregator {
           resultType,
           requests,
           stream,
+          mr,
           sumIdx_,
           countIdx_,
           decodedSum_,
           decodedCount_);
     } else if (step == core::AggregationNode::Step::kFinal) {
       addDecimalFinalSumOnlyRequest(
-          tbl, inputIndex, resultType, requests, stream, sumIdx_, decodedSum_);
+          tbl,
+          inputIndex,
+          resultType,
+          requests,
+          stream,
+          mr,
+          sumIdx_,
+          decodedSum_);
     } else {
       addDecimalRawPartialSingleSumRequest(
           tbl,
@@ -253,21 +270,22 @@ struct GroupbyDecimalSumAggregator : GroupbyAggregator {
 
   std::unique_ptr<cudf::column> makeOutputColumn(
       std::vector<cudf::groupby::aggregation_result>& results,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     auto col = std::move(results[sumIdx_].results[0]);
     if (step == core::AggregationNode::Step::kPartial) {
       auto count = std::move(results[sumIdx_].results[1]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, mr);
     }
     if (step == core::AggregationNode::Step::kIntermediate) {
       auto count = std::move(results[countIdx_].results[0]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, mr);
     }
     auto const cudfResType = cudf_velox::veloxToCudfDataType(resultType);
     if (col->type() != cudfResType) {
-      col = cudf::cast(*col, cudfResType, stream, cudf_velox::get_output_mr());
+      col = cudf::cast(*col, cudfResType, stream, mr);
     }
     return col;
   }
@@ -290,7 +308,8 @@ struct GroupbyDecimalAvgAggregator : GroupbyAggregator {
   void addGroupbyRequest(
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     if (step == core::AggregationNode::Step::kIntermediate) {
       addDecimalIntermediateSumCountRequests(
           tbl,
@@ -298,6 +317,7 @@ struct GroupbyDecimalAvgAggregator : GroupbyAggregator {
           resultType,
           requests,
           stream,
+          mr,
           sumIdx_,
           countIdx_,
           decodedSum_,
@@ -309,6 +329,7 @@ struct GroupbyDecimalAvgAggregator : GroupbyAggregator {
           resultType,
           requests,
           stream,
+          mr,
           sumIdx_,
           countIdx_,
           decodedSum_,
@@ -326,31 +347,32 @@ struct GroupbyDecimalAvgAggregator : GroupbyAggregator {
 
   std::unique_ptr<cudf::column> makeOutputColumn(
       std::vector<cudf::groupby::aggregation_result>& results,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     auto col = std::move(results[sumIdx_].results[0]);
     if (step == core::AggregationNode::Step::kSingle) {
       auto count = std::move(results[sumIdx_].results[1]);
       return finalizeDecimalAverage(
-          std::move(col), std::move(count), resultType, stream);
+          std::move(col), std::move(count), resultType, stream, mr);
     }
     if (step == core::AggregationNode::Step::kPartial) {
       auto count = std::move(results[sumIdx_].results[1]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, mr);
     }
     if (step == core::AggregationNode::Step::kIntermediate) {
       auto count = std::move(results[countIdx_].results[0]);
       return serializeDecimalPartialOrIntermediateState(
-          std::move(col), std::move(count), stream);
+          std::move(col), std::move(count), stream, mr);
     }
     if (step == core::AggregationNode::Step::kFinal) {
       auto count = std::move(results[countIdx_].results[0]);
       return finalizeDecimalAverage(
-          std::move(col), std::move(count), resultType, stream);
+          std::move(col), std::move(count), resultType, stream, mr);
     }
     auto const cudfResType = cudf_velox::veloxToCudfDataType(resultType);
     if (col->type() != cudfResType) {
-      col = cudf::cast(*col, cudfResType, stream, cudf_velox::get_output_mr());
+      col = cudf::cast(*col, cudfResType, stream, mr);
     }
     return col;
   }
@@ -374,7 +396,8 @@ struct GroupbyCountAggregator : GroupbyAggregator {
   void addGroupbyRequest(
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     auto& request = requests.emplace_back();
     outputIndex_ = requests.size() - 1;
     // kCountAll and kNullConstant both submit a count-all-rows request;
@@ -397,17 +420,17 @@ struct GroupbyCountAggregator : GroupbyAggregator {
 
   std::unique_ptr<cudf::column> makeOutputColumn(
       std::vector<cudf::groupby::aggregation_result>& results,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     auto col = std::move(results[outputIndex_].results[0]);
     if (inputKind_ == CountInputKind::kNullConstant) {
       auto zero = cudf::numeric_scalar<int64_t>(0, true, stream, get_temp_mr());
-      col = cudf::make_column_from_scalar(
-          zero, col->size(), stream, get_output_mr());
+      col = cudf::make_column_from_scalar(zero, col->size(), stream, mr);
     }
     // cudf produces int32 for count but velox expects int64.
     const auto cudfOutputType = cudf_velox::veloxToCudfDataType(resultType);
     if (col->type() != cudfOutputType) {
-      col = cudf::cast(*col, cudfOutputType, stream, get_output_mr());
+      col = cudf::cast(*col, cudfOutputType, stream, mr);
     }
     return col;
   }
@@ -428,7 +451,8 @@ struct GroupbyMeanAggregator : GroupbyAggregator {
   void addGroupbyRequest(
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     switch (step) {
       case core::AggregationNode::Step::kSingle: {
         auto& request = requests.emplace_back();
@@ -475,7 +499,8 @@ struct GroupbyMeanAggregator : GroupbyAggregator {
 
   std::unique_ptr<cudf::column> makeOutputColumn(
       std::vector<cudf::groupby::aggregation_result>& results,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     const auto& outputType = asRowType(resultType);
     switch (step) {
       case core::AggregationNode::Step::kSingle:
@@ -490,12 +515,11 @@ struct GroupbyMeanAggregator : GroupbyAggregator {
         auto const cudfCountType =
             cudf_velox::veloxToCudfDataType(outputType->childAt(1));
         if (sum->type() != cudf::data_type(cudfSumType)) {
-          sum = cudf::cast(
-              *sum, cudf::data_type(cudfSumType), stream, get_output_mr());
+          sum = cudf::cast(*sum, cudf::data_type(cudfSumType), stream, mr);
         }
         if (count->type() != cudf::data_type(cudfCountType)) {
-          count = cudf::cast(
-              *count, cudf::data_type(cudfCountType), stream, get_output_mr());
+          count =
+              cudf::cast(*count, cudf::data_type(cudfCountType), stream, mr);
         }
 
         auto children = std::vector<std::unique_ptr<cudf::column>>();
@@ -528,12 +552,11 @@ struct GroupbyMeanAggregator : GroupbyAggregator {
         auto const cudfCountType =
             cudf_velox::veloxToCudfDataType(outputType->childAt(1));
         if (sum->type() != cudf::data_type(cudfSumType)) {
-          sum = cudf::cast(
-              *sum, cudf::data_type(cudfSumType), stream, get_output_mr());
+          sum = cudf::cast(*sum, cudf::data_type(cudfSumType), stream, mr);
         }
         if (count->type() != cudf::data_type(cudfCountType)) {
-          count = cudf::cast(
-              *count, cudf::data_type(cudfCountType), stream, get_output_mr());
+          count =
+              cudf::cast(*count, cudf::data_type(cudfCountType), stream, mr);
         }
 
         auto children = std::vector<std::unique_ptr<cudf::column>>();
@@ -557,7 +580,7 @@ struct GroupbyMeanAggregator : GroupbyAggregator {
             cudf::binary_operator::DIV,
             cudf_velox::veloxToCudfDataType(resultType),
             stream,
-            get_output_mr());
+            mr);
         return avg;
       }
       default:
@@ -584,7 +607,8 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
   void addGroupbyRequest(
       cudf::table_view const& tbl,
       std::vector<cudf::groupby::aggregation_request>& requests,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     auto& request = requests.emplace_back();
     outputIdx_ = requests.size() - 1;
     request.values = tbl.column(inputIndex);
@@ -618,7 +642,8 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
 
   std::unique_ptr<cudf::column> makeOutputColumn(
       std::vector<cudf::groupby::aggregation_result>& results,
-      rmm::cuda_stream_view stream) override {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) override {
     switch (step) {
       case core::AggregationNode::Step::kSingle:
         return std::move(results[outputIdx_].results[0]);
@@ -627,7 +652,7 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
         auto mean = std::move(results[outputIdx_].results[1]);
         auto m2 = std::move(results[outputIdx_].results[2]);
         return makeM2StructColumn(
-            std::move(count), std::move(mean), std::move(m2), stream);
+            std::move(count), std::move(mean), std::move(m2), stream, mr);
       }
       case core::AggregationNode::Step::kIntermediate: {
         auto merged = std::move(results[outputIdx_].results[0]);
@@ -653,14 +678,14 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
 
         // Types don't match - need to copy and cast (use output_mr since
         // these become part of the output)
-        auto count = std::make_unique<cudf::column>(
-            mergedView.child(0), stream, get_output_mr());
-        auto mean = std::make_unique<cudf::column>(
-            mergedView.child(1), stream, get_output_mr());
-        auto m2 = std::make_unique<cudf::column>(
-            mergedView.child(2), stream, get_output_mr());
+        auto count =
+            std::make_unique<cudf::column>(mergedView.child(0), stream, mr);
+        auto mean =
+            std::make_unique<cudf::column>(mergedView.child(1), stream, mr);
+        auto m2 =
+            std::make_unique<cudf::column>(mergedView.child(2), stream, mr);
         return makeM2StructColumn(
-            std::move(count), std::move(mean), std::move(m2), stream);
+            std::move(count), std::move(mean), std::move(m2), stream, mr);
       }
       case core::AggregationNode::Step::kFinal: {
         // MERGE_M2 returns struct(count, mean, m2)
@@ -706,8 +731,7 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
         // Apply mask: where count < 2, result is NULL
         cudf::numeric_scalar<double> nullDouble(
             0.0, false, stream, get_temp_mr());
-        return cudf::copy_if_else(
-            *stddev, nullDouble, *validMask, stream, get_output_mr());
+        return cudf::copy_if_else(*stddev, nullDouble, *validMask, stream, mr);
       }
       default:
         VELOX_NYI("Unsupported aggregation step for stddev_samp");
@@ -720,7 +744,8 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
       std::unique_ptr<cudf::column> count,
       std::unique_ptr<cudf::column> mean,
       std::unique_ptr<cudf::column> m2,
-      rmm::cuda_stream_view stream) {
+      rmm::cuda_stream_view stream,
+      rmm::device_async_resource_ref mr) {
     const auto& outputType = asRowType(resultType);
     auto const cudfCountType =
         cudf_velox::veloxToCudfDataType(outputType->childAt(0));
@@ -729,13 +754,13 @@ struct GroupbyStddevSampAggregator : GroupbyAggregator {
     auto const cudfM2Type =
         cudf_velox::veloxToCudfDataType(outputType->childAt(2));
     if (count->type() != cudfCountType) {
-      count = cudf::cast(*count, cudfCountType, stream, get_output_mr());
+      count = cudf::cast(*count, cudfCountType, stream, mr);
     }
     if (mean->type() != cudfMeanType) {
-      mean = cudf::cast(*mean, cudfMeanType, stream, get_output_mr());
+      mean = cudf::cast(*mean, cudfMeanType, stream, mr);
     }
     if (m2->type() != cudfM2Type) {
-      m2 = cudf::cast(*m2, cudfM2Type, stream, get_output_mr());
+      m2 = cudf::cast(*m2, cudfM2Type, stream, mr);
     }
 
     auto const size = count->size();
@@ -987,7 +1012,8 @@ void CudfGroupby::computePartialGroupbyStreaming(CudfVectorPtr tbl) {
       groupingKeyOutputChannels_,
       aggregators_,
       bufferedResultType_,
-      inputTableStream);
+      inputTableStream,
+      get_output_mr());
 
   // If we already have partial output, concatenate the new results with it.
   if (bufferedResult_) {
@@ -1008,7 +1034,8 @@ void CudfGroupby::computePartialGroupbyStreaming(CudfVectorPtr tbl) {
         groupingKeyOutputChannels_,
         intermediateAggregators_,
         bufferedResultType_,
-        partialOutputStream);
+        partialOutputStream,
+        get_output_mr());
     bufferedResult_ = compactedOutput;
   } else {
     // First time processing, just store the result of the input batch's groupby
@@ -1028,7 +1055,8 @@ void CudfGroupby::computeFinalGroupbyStreaming(CudfVectorPtr tbl) {
         groupingKeyOutputChannels_,
         intermediateAggregators_,
         bufferedResultType_,
-        inputTableStream);
+        inputTableStream,
+        get_output_mr());
     if (!groupbyOnInput) {
       return;
     }
@@ -1053,7 +1081,8 @@ void CudfGroupby::computeFinalGroupbyStreaming(CudfVectorPtr tbl) {
       groupingKeyOutputChannels_,
       intermediateAggregators_,
       bufferedResultType_,
-      finalStream);
+      finalStream,
+      get_output_mr());
   bufferedResult_ = compactedOutput;
 }
 
@@ -1066,7 +1095,8 @@ void CudfGroupby::computeSingleGroupbyStreaming(CudfVectorPtr tbl) {
       groupingKeyOutputChannels_,
       partialAggregators_,
       bufferedResultType_,
-      inputTableStream);
+      inputTableStream,
+      get_output_mr());
 
   if (bufferedResult_) {
     auto partialOutputStream = bufferedResult_->stream();
@@ -1084,7 +1114,8 @@ void CudfGroupby::computeSingleGroupbyStreaming(CudfVectorPtr tbl) {
         groupingKeyOutputChannels_,
         intermediateAggregators_,
         bufferedResultType_,
-        partialOutputStream);
+        partialOutputStream,
+        get_output_mr());
     bufferedResult_ = compactedOutput;
   } else {
     bufferedResult_ = groupbyOnInput;
@@ -1122,7 +1153,8 @@ CudfVectorPtr CudfGroupby::doGroupByAggregation(
     std::vector<column_index_t> const& groupByKeys,
     std::vector<std::unique_ptr<GroupbyAggregator>>& aggregators,
     TypePtr const& outputType,
-    rmm::cuda_stream_view stream) {
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
   auto groupbyKeyView =
       tableView.select(groupByKeys.begin(), groupByKeys.end());
 
@@ -1135,11 +1167,10 @@ CudfVectorPtr CudfGroupby::doGroupByAggregation(
 
   std::vector<cudf::groupby::aggregation_request> requests;
   for (auto& aggregator : aggregators) {
-    aggregator->addGroupbyRequest(tableView, requests, stream);
+    aggregator->addGroupbyRequest(tableView, requests, stream, mr);
   }
 
-  auto [groupKeys, results] =
-      groupByOwner.aggregate(requests, stream, get_output_mr());
+  auto [groupKeys, results] = groupByOwner.aggregate(requests, stream, mr);
   // flatten the results
   std::vector<std::unique_ptr<cudf::column>> resultColumns;
 
@@ -1152,7 +1183,7 @@ CudfVectorPtr CudfGroupby::doGroupByAggregation(
 
   // then fill the aggregation results
   for (auto& aggregator : aggregators) {
-    resultColumns.push_back(aggregator->makeOutputColumn(results, stream));
+    resultColumns.push_back(aggregator->makeOutputColumn(results, stream, mr));
   }
 
   // make a cudf table out of columns
@@ -1236,7 +1267,8 @@ RowVectorPtr CudfGroupby::doGetOutput() {
         groupingKeyOutputChannels_,
         aggs,
         outputType_,
-        stream);
+        stream,
+        get_output_mr());
     stream.synchronize();
     bufferedResult_.reset();
     return result;
@@ -1247,9 +1279,10 @@ RowVectorPtr CudfGroupby::doGetOutput() {
   }
 
   auto stream = cudfGlobalStreamPool().get_stream();
+  auto const outputMr = get_output_mr();
 
   auto tbl = getConcatenatedTable(
-      std::exchange(inputs_, {}), inputType_, stream, get_output_mr());
+      std::exchange(inputs_, {}), inputType_, stream, outputMr);
 
   // Release input data after synchronizing.
   stream.synchronize();
@@ -1268,7 +1301,8 @@ RowVectorPtr CudfGroupby::doGetOutput() {
       groupingKeyOutputChannels_,
       aggregators_,
       outputType_,
-      stream);
+      stream,
+      outputMr);
 }
 
 void CudfGroupby::doNoMoreInput() {
