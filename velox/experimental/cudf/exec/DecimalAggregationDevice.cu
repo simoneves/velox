@@ -234,132 +234,130 @@ std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMaskImpl(
 
 namespace detail {
 
+template <typename OffsetT>
 void fillOffsetsForDecimalSumState(
-    bool use64BitOffsets,
-    void* offsetsMutable,
-    int32_t numRows,
+    OffsetT* offsetsMutable,
+    cudf::size_type numRows,
     rmm::cuda_stream_view stream) {
   // The offsets buffer holds numRows + 1 entries.
   auto const n = static_cast<size_t>(numRows) + 1;
-  if (use64BitOffsets) {
-    launchFillOffsets(
-        cuda::std::span<int64_t>{static_cast<int64_t*>(offsetsMutable), n},
-        stream);
-  } else {
-    launchFillOffsets(
-        cuda::std::span<int32_t>{static_cast<int32_t*>(offsetsMutable), n},
-        stream);
-  }
+  launchFillOffsets(cuda::std::span<OffsetT>{offsetsMutable, n}, stream);
 }
 
+template <typename SumT, typename OffsetT>
 void packDecimalSumState(
-    cudf::type_id sumType,
-    bool use64BitOffsets,
-    const void* sumPtr,
-    const int64_t* countPtr,
-    const void* offsetsPtr,
+    const SumT* sums,
+    const int64_t* counts,
+    const OffsetT* offsets,
     uint8_t* chars,
-    int32_t numRows,
+    cudf::size_type numRows,
     rmm::cuda_stream_view stream) {
   auto const n = static_cast<size_t>(numRows);
-  cuda::std::span<const int64_t> counts{countPtr, n};
-  if (use64BitOffsets) {
-    cuda::std::span<const int64_t> offsets{
-        static_cast<const int64_t*>(offsetsPtr), n};
-    if (sumType == cudf::type_id::DECIMAL64) {
-      launchPackState(
-          cuda::std::span<const int64_t>{
-              static_cast<const int64_t*>(sumPtr), n},
-          counts,
-          offsets,
-          chars,
-          stream);
-    } else {
-      launchPackState(
-          cuda::std::span<const __int128_t>{
-              static_cast<const __int128_t*>(sumPtr), n},
-          counts,
-          offsets,
-          chars,
-          stream);
-    }
-  } else {
-    cuda::std::span<const int32_t> offsets{
-        static_cast<const int32_t*>(offsetsPtr), n};
-    if (sumType == cudf::type_id::DECIMAL64) {
-      launchPackState(
-          cuda::std::span<const int64_t>{
-              static_cast<const int64_t*>(sumPtr), n},
-          counts,
-          offsets,
-          chars,
-          stream);
-    } else {
-      launchPackState(
-          cuda::std::span<const __int128_t>{
-              static_cast<const __int128_t*>(sumPtr), n},
-          counts,
-          offsets,
-          chars,
-          stream);
-    }
-  }
+  launchPackState(
+      cuda::std::span<const SumT>{sums, n},
+      cuda::std::span<const int64_t>{counts, n},
+      cuda::std::span<const OffsetT>{offsets, n},
+      chars,
+      stream);
 }
 
+template <typename OffsetT>
 void unpackDecimalSumState(
-    bool offsets64,
-    const void* offsetsPtr,
+    const OffsetT* offsets,
     const uint8_t* chars,
     __int128_t* sums,
     int64_t* counts,
-    int32_t numRows,
+    cudf::size_type numRows,
     rmm::cuda_stream_view stream) {
   auto const n = static_cast<size_t>(numRows);
-  cuda::std::span<__int128_t> sumsSpan{sums, n};
-  cuda::std::span<int64_t> countsSpan{counts, n};
-  if (offsets64) {
-    launchUnpackState(
-        cuda::std::span<const int64_t>{
-            static_cast<const int64_t*>(offsetsPtr), n},
-        chars,
-        sumsSpan,
-        countsSpan,
-        stream);
-  } else {
-    launchUnpackState(
-        cuda::std::span<const int32_t>{
-            static_cast<const int32_t*>(offsetsPtr), n},
-        chars,
-        sumsSpan,
-        countsSpan,
-        stream);
-  }
+  launchUnpackState(
+      cuda::std::span<const OffsetT>{offsets, n},
+      chars,
+      cuda::std::span<__int128_t>{sums, n},
+      cuda::std::span<int64_t>{counts, n},
+      stream);
 }
 
+template <typename SumT>
 void averageRoundDecimalSum(
-    cudf::type_id sumType,
-    const void* sums,
+    const SumT* sums,
     const int64_t* counts,
-    void* out,
-    int32_t numRows,
+    SumT* out,
+    cudf::size_type numRows,
     rmm::cuda_stream_view stream) {
   auto const n = static_cast<size_t>(numRows);
-  cuda::std::span<const int64_t> countsSpan{counts, n};
-  if (sumType == cudf::type_id::DECIMAL64) {
-    launchAvgRound(
-        cuda::std::span<const int64_t>{static_cast<const int64_t*>(sums), n},
-        countsSpan,
-        cuda::std::span<int64_t>{static_cast<int64_t*>(out), n},
-        stream);
-  } else {
-    launchAvgRound(
-        cuda::std::span<const __int128_t>{
-            static_cast<const __int128_t*>(sums), n},
-        countsSpan,
-        cuda::std::span<__int128_t>{static_cast<__int128_t*>(out), n},
-        stream);
-  }
+  launchAvgRound(
+      cuda::std::span<const SumT>{sums, n},
+      cuda::std::span<const int64_t>{counts, n},
+      cuda::std::span<SumT>{out, n},
+      stream);
 }
+
+template void fillOffsetsForDecimalSumState<int32_t>(
+    int32_t* offsetsMutable,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void fillOffsetsForDecimalSumState<int64_t>(
+    int64_t* offsetsMutable,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+
+template void packDecimalSumState<int64_t, int32_t>(
+    const int64_t* sums,
+    const int64_t* counts,
+    const int32_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void packDecimalSumState<int64_t, int64_t>(
+    const int64_t* sums,
+    const int64_t* counts,
+    const int64_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void packDecimalSumState<__int128_t, int32_t>(
+    const __int128_t* sums,
+    const int64_t* counts,
+    const int32_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void packDecimalSumState<__int128_t, int64_t>(
+    const __int128_t* sums,
+    const int64_t* counts,
+    const int64_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+
+template void unpackDecimalSumState<int32_t>(
+    const int32_t* offsets,
+    const uint8_t* chars,
+    __int128_t* sums,
+    int64_t* counts,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void unpackDecimalSumState<int64_t>(
+    const int64_t* offsets,
+    const uint8_t* chars,
+    __int128_t* sums,
+    int64_t* counts,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+
+template void averageRoundDecimalSum<int64_t>(
+    const int64_t* sums,
+    const int64_t* counts,
+    int64_t* out,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void averageRoundDecimalSum<__int128_t>(
+    const __int128_t* sums,
+    const int64_t* counts,
+    __int128_t* out,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
 
 std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMask(
     const cudf::column_view& sumCol,

@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationDevice.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationState.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
@@ -25,10 +24,86 @@
 #include <cudf/null_mask.hpp>
 #include <cudf/strings/strings_column_view.hpp>
 #include <cudf/strings/utilities.hpp>
+#include <cudf/utilities/type_dispatcher.hpp>
 
 #include <limits>
 
+#include "velox/experimental/cudf/CudfNoDefaults.h"
+
 namespace facebook::velox::cudf_velox {
+namespace {
+
+struct UnpackDecimalSumStateDispatcher {
+  const cudf::column_view& offsetsView;
+  const uint8_t* charsPtr;
+  __int128_t* sums;
+  int64_t* counts;
+  cudf::size_type numRows;
+  rmm::cuda_stream_view stream;
+
+  template <typename OffsetT>
+  void operator()() {
+    detail::unpackDecimalSumState(
+        offsetsView.data<OffsetT>(),
+        charsPtr,
+        sums,
+        counts,
+        numRows,
+        stream);
+  }
+};
+
+struct FillOffsetsForDecimalSumStateDispatcher {
+  cudf::mutable_column_view offsetsView;
+  cudf::size_type rowCount;
+  rmm::cuda_stream_view stream;
+
+  template <typename OffsetT>
+  void operator()() {
+    detail::fillOffsetsForDecimalSumState(
+        offsetsView.data<OffsetT>(), rowCount, stream);
+  }
+};
+
+struct PackDecimalSumStateDispatcher {
+  const cudf::column_view& sumCol;
+  const int64_t* countPtr;
+  cudf::column_view offsetsView;
+  uint8_t* charsPtr;
+  cudf::size_type rowCount;
+  rmm::cuda_stream_view stream;
+
+  template <typename SumT, typename OffsetT>
+  void operator()() {
+    detail::packDecimalSumState(
+        sumCol.data<SumT>(),
+        countPtr,
+        offsetsView.data<OffsetT>(),
+        charsPtr,
+        rowCount,
+        stream);
+  }
+};
+
+struct AverageRoundDecimalSumDispatcher {
+  const cudf::column_view& sumCol;
+  const int64_t* countPtr;
+  cudf::mutable_column_view outView;
+  cudf::size_type rowCount;
+  rmm::cuda_stream_view stream;
+
+  template <typename SumT>
+  void operator()() {
+    detail::averageRoundDecimalSum(
+        sumCol.data<SumT>(),
+        countPtr,
+        outView.data<SumT>(),
+        rowCount,
+        stream);
+  }
+};
+
+} // namespace
 
 DecimalSumStateColumns deserializeDecimalSumState(
     const cudf::column_view& stateCol,
@@ -81,7 +156,6 @@ DecimalSumStateColumns deserializeDecimalSumState(
   cudf::strings_column_view strings(stateCol);
 
   auto offsetsView = strings.offsets();
-  auto offsetsType = offsetsView.type().id();
   auto charsPtr = reinterpret_cast<const uint8_t*>(strings.chars_begin(stream));
 
   auto sumCol = cudf::make_fixed_width_column(
@@ -101,20 +175,21 @@ DecimalSumStateColumns deserializeDecimalSumState(
   auto countView = countCol->mutable_view();
 
   // numRows is guaranteed positive here
-  const bool offsets64 = (offsetsType == cudf::type_id::INT64);
+  auto const offsetsType = offsetsView.type().id();
   VELOX_CHECK(
-      offsets64 || offsetsType == cudf::type_id::INT32,
+      offsetsType == cudf::type_id::INT32 ||
+          offsetsType == cudf::type_id::INT64,
       "Decimal sum state requires INT32 or INT64 offsets (offset type is {})",
-      static_cast<int>(offsetsType));
-  detail::unpackDecimalSumState(
-      offsets64,
-      offsets64 ? static_cast<const void*>(offsetsView.data<int64_t>())
-                : static_cast<const void*>(offsetsView.data<int32_t>()),
-      charsPtr,
-      sumView.data<__int128_t>(),
-      countView.data<int64_t>(),
-      numRows,
-      stream);
+      cudf::type_to_name(offsetsView.type()));
+  cudf::type_dispatcher(
+      offsetsView.type(),
+      UnpackDecimalSumStateDispatcher{
+          offsetsView,
+          charsPtr,
+          sumView.data<__int128_t>(),
+          countView.data<int64_t>(),
+          numRows,
+          stream});
 
   if (stateCol.nullable()) {
     auto nullMask = cudf::copy_bitmask(stateCol, stream, mr);
@@ -183,35 +258,28 @@ std::unique_ptr<cudf::column> serializeDecimalSumState(
   rmm::device_buffer charsBuf(
       static_cast<size_t>(numRows) * detail::kDecimalSumStateSize, stream, mr);
 
-  detail::fillOffsetsForDecimalSumState(
-      useLargeOffsets,
-      useLargeOffsets ? static_cast<void*>(offsetsView.data<int64_t>())
-                      : static_cast<void*>(offsetsView.data<int32_t>()),
-      rowCount,
-      stream);
-
   auto charsPtr = reinterpret_cast<uint8_t*>(charsBuf.data());
-  const void* offsetsPtr = useLargeOffsets
-      ? static_cast<const void*>(offsetsView.data<int64_t>())
-      : static_cast<const void*>(offsetsView.data<int32_t>());
-  const auto sumType = sumCol.type().id();
+  cudf::type_dispatcher(
+      offsetsView.type(),
+      FillOffsetsForDecimalSumStateDispatcher{
+          offsetsView, rowCount, stream});
+
+  auto const sumType = sumCol.type().id();
   VELOX_CHECK(
       sumType == cudf::type_id::DECIMAL64 ||
           sumType == cudf::type_id::DECIMAL128,
       "Unsupported decimal sum column type (type is {})",
       cudf::type_to_name(sumCol.type()));
-  const void* sumPtr = sumType == cudf::type_id::DECIMAL64
-      ? static_cast<const void*>(sumCol.data<int64_t>())
-      : static_cast<const void*>(sumCol.data<__int128_t>());
-  detail::packDecimalSumState(
-      sumType,
-      useLargeOffsets,
-      sumPtr,
-      countCol.data<int64_t>(),
-      offsetsPtr,
-      charsPtr,
-      rowCount,
-      stream);
+  cudf::double_type_dispatcher<cudf::dispatch_storage_type>(
+      sumCol.type(),
+      offsetsView.type(),
+      PackDecimalSumStateDispatcher{
+          sumCol,
+          countCol.data<int64_t>(),
+          offsetsView,
+          charsPtr,
+          rowCount,
+          stream});
 
   auto [nullMask, nullCount] =
       detail::buildStateValidityMask(sumCol, countCol, stream, mr);
@@ -250,15 +318,14 @@ std::unique_ptr<cudf::column> computeDecimalAverage(
 
   if (numRows > 0) {
     auto const rowCount = static_cast<int32_t>(numRows);
-    const auto sumType = sumCol.type().id();
-    const void* sumsPtr = sumType == cudf::type_id::DECIMAL64
-        ? static_cast<const void*>(sumCol.data<int64_t>())
-        : static_cast<const void*>(sumCol.data<__int128_t>());
-    void* outPtr = sumType == cudf::type_id::DECIMAL64
-        ? static_cast<void*>(out->mutable_view().data<int64_t>())
-        : static_cast<void*>(out->mutable_view().data<__int128_t>());
-    detail::averageRoundDecimalSum(
-        sumType, sumsPtr, countCol.data<int64_t>(), outPtr, rowCount, stream);
+    cudf::type_dispatcher<cudf::dispatch_storage_type>(
+        sumCol.type(),
+        AverageRoundDecimalSumDispatcher{
+            sumCol,
+            countCol.data<int64_t>(),
+            out->mutable_view(),
+            rowCount,
+            stream});
   }
 
   auto [nullMask, nullCount] =
