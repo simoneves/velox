@@ -27,6 +27,7 @@
 #include <cudf/utilities/type_dispatcher.hpp>
 
 #include <limits>
+#include <type_traits>
 
 #include "velox/experimental/cudf/CudfNoDefaults.h"
 
@@ -43,13 +44,16 @@ struct UnpackDecimalSumStateDispatcher {
 
   template <typename OffsetT>
   void operator()() {
-    detail::unpackDecimalSumState(
-        offsetsView.data<OffsetT>(),
-        charsPtr,
-        sums,
-        counts,
-        numRows,
-        stream);
+    if constexpr (std::is_same_v<OffsetT, int32_t> ||
+                  std::is_same_v<OffsetT, int64_t>) {
+      detail::unpackDecimalSumState(
+          offsetsView.data<OffsetT>(),
+          charsPtr,
+          sums,
+          counts,
+          numRows,
+          stream);
+    }
   }
 };
 
@@ -60,8 +64,11 @@ struct FillOffsetsForDecimalSumStateDispatcher {
 
   template <typename OffsetT>
   void operator()() {
-    detail::fillOffsetsForDecimalSumState(
-        offsetsView.data<OffsetT>(), rowCount, stream);
+    if constexpr (std::is_same_v<OffsetT, int32_t> ||
+                  std::is_same_v<OffsetT, int64_t>) {
+      detail::fillOffsetsForDecimalSumState(
+          offsetsView.data<OffsetT>(), rowCount, stream);
+    }
   }
 };
 
@@ -75,13 +82,18 @@ struct PackDecimalSumStateDispatcher {
 
   template <typename SumT, typename OffsetT>
   void operator()() {
-    detail::packDecimalSumState(
-        sumCol.data<SumT>(),
-        countPtr,
-        offsetsView.data<OffsetT>(),
-        charsPtr,
-        rowCount,
-        stream);
+    if constexpr ((std::is_same_v<SumT, int64_t> ||
+                   std::is_same_v<SumT, __int128_t>) &&
+                  (std::is_same_v<OffsetT, int32_t> ||
+                   std::is_same_v<OffsetT, int64_t>)) {
+      detail::packDecimalSumState(
+          sumCol.data<SumT>(),
+          countPtr,
+          offsetsView.data<OffsetT>(),
+          charsPtr,
+          rowCount,
+          stream);
+    }
   }
 };
 
@@ -94,12 +106,15 @@ struct AverageRoundDecimalSumDispatcher {
 
   template <typename SumT>
   void operator()() {
-    detail::averageRoundDecimalSum(
-        sumCol.data<SumT>(),
-        countPtr,
-        outView.data<SumT>(),
-        rowCount,
-        stream);
+    if constexpr (std::is_same_v<SumT, int64_t> ||
+                  std::is_same_v<SumT, __int128_t>) {
+      detail::averageRoundDecimalSum(
+          sumCol.data<SumT>(),
+          countPtr,
+          outView.data<SumT>(),
+          rowCount,
+          stream);
+    }
   }
 };
 
