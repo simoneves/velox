@@ -241,8 +241,7 @@ void fillOffsetsForDecimalSumState::operator()<int32_t, 0>(
     rmm::cuda_stream_view stream) const {
   launchFillOffsets(
       cuda::std::span<int32_t>{
-          offsetsView.data<int32_t>(),
-          static_cast<size_t>(numRows) + 1},
+          offsetsView.data<int32_t>(), static_cast<size_t>(numRows) + 1},
       stream);
 }
 
@@ -253,8 +252,7 @@ void fillOffsetsForDecimalSumState::operator()<int64_t, 0>(
     rmm::cuda_stream_view stream) const {
   launchFillOffsets(
       cuda::std::span<int64_t>{
-          offsetsView.data<int64_t>(),
-          static_cast<size_t>(numRows) + 1},
+          offsetsView.data<int64_t>(), static_cast<size_t>(numRows) + 1},
       stream);
 }
 

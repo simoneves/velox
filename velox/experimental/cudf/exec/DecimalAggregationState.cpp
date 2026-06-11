@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationDevice.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationState.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
@@ -27,8 +28,6 @@
 #include <cudf/utilities/type_dispatcher.hpp>
 
 #include <limits>
-
-#include "velox/experimental/cudf/CudfNoDefaults.h"
 
 namespace facebook::velox::cudf_velox {
 
