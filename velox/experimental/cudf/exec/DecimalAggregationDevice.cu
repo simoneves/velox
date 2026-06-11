@@ -235,34 +235,16 @@ std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMaskImpl(
 namespace detail {
 
 template <typename OffsetT>
-void fillOffsetsForDecimalSumState(
+void launchFillOffsetsForDecimalSumState(
     OffsetT* offsetsMutable,
-    cudf::size_type numRows,
+    size_t offsetCount,
     rmm::cuda_stream_view stream) {
-  // The offsets buffer holds numRows + 1 entries.
-  auto const n = static_cast<size_t>(numRows) + 1;
-  launchFillOffsets(cuda::std::span<OffsetT>{offsetsMutable, n}, stream);
-}
-
-template <typename SumT, typename OffsetT>
-void packDecimalSumState(
-    const SumT* sums,
-    const int64_t* counts,
-    const OffsetT* offsets,
-    uint8_t* chars,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream) {
-  auto const n = static_cast<size_t>(numRows);
-  launchPackState(
-      cuda::std::span<const SumT>{sums, n},
-      cuda::std::span<const int64_t>{counts, n},
-      cuda::std::span<const OffsetT>{offsets, n},
-      chars,
-      stream);
+  launchFillOffsets(
+      cuda::std::span<OffsetT>{offsetsMutable, offsetCount}, stream);
 }
 
 template <typename OffsetT>
-void unpackDecimalSumState(
+void launchUnpackDecimalSumState(
     const OffsetT* offsets,
     const uint8_t* chars,
     __int128_t* sums,
@@ -278,8 +260,25 @@ void unpackDecimalSumState(
       stream);
 }
 
+template <typename SumT, typename OffsetT>
+void launchPackDecimalSumState(
+    const SumT* sums,
+    const int64_t* counts,
+    const OffsetT* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream) {
+  auto const n = static_cast<size_t>(numRows);
+  launchPackState(
+      cuda::std::span<const SumT>{sums, n},
+      cuda::std::span<const int64_t>{counts, n},
+      cuda::std::span<const OffsetT>{offsets, n},
+      chars,
+      stream);
+}
+
 template <typename SumT>
-void averageRoundDecimalSum(
+void launchAverageRoundDecimalSum(
     const SumT* sums,
     const int64_t* counts,
     SumT* out,
@@ -293,72 +292,6 @@ void averageRoundDecimalSum(
       stream);
 }
 
-template void fillOffsetsForDecimalSumState<int32_t>(
-    int32_t* offsetsMutable,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-template void fillOffsetsForDecimalSumState<int64_t>(
-    int64_t* offsetsMutable,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-
-template void packDecimalSumState<int64_t, int32_t>(
-    const int64_t* sums,
-    const int64_t* counts,
-    const int32_t* offsets,
-    uint8_t* chars,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-template void packDecimalSumState<int64_t, int64_t>(
-    const int64_t* sums,
-    const int64_t* counts,
-    const int64_t* offsets,
-    uint8_t* chars,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-template void packDecimalSumState<__int128_t, int32_t>(
-    const __int128_t* sums,
-    const int64_t* counts,
-    const int32_t* offsets,
-    uint8_t* chars,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-template void packDecimalSumState<__int128_t, int64_t>(
-    const __int128_t* sums,
-    const int64_t* counts,
-    const int64_t* offsets,
-    uint8_t* chars,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-
-template void unpackDecimalSumState<int32_t>(
-    const int32_t* offsets,
-    const uint8_t* chars,
-    __int128_t* sums,
-    int64_t* counts,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-template void unpackDecimalSumState<int64_t>(
-    const int64_t* offsets,
-    const uint8_t* chars,
-    __int128_t* sums,
-    int64_t* counts,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-
-template void averageRoundDecimalSum<int64_t>(
-    const int64_t* sums,
-    const int64_t* counts,
-    int64_t* out,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-template void averageRoundDecimalSum<__int128_t>(
-    const __int128_t* sums,
-    const int64_t* counts,
-    __int128_t* out,
-    cudf::size_type numRows,
-    rmm::cuda_stream_view stream);
-
 std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMask(
     const cudf::column_view& sumCol,
     const cudf::column_view& countCol,
@@ -366,6 +299,72 @@ std::pair<rmm::device_buffer, cudf::size_type> buildStateValidityMask(
     rmm::device_async_resource_ref mr) {
   return buildStateValidityMaskImpl(sumCol, countCol, stream, mr);
 }
+
+template void launchFillOffsetsForDecimalSumState<int32_t>(
+    int32_t* offsetsMutable,
+    size_t offsetCount,
+    rmm::cuda_stream_view stream);
+template void launchFillOffsetsForDecimalSumState<int64_t>(
+    int64_t* offsetsMutable,
+    size_t offsetCount,
+    rmm::cuda_stream_view stream);
+
+template void launchUnpackDecimalSumState<int32_t>(
+    const int32_t* offsets,
+    const uint8_t* chars,
+    __int128_t* sums,
+    int64_t* counts,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void launchUnpackDecimalSumState<int64_t>(
+    const int64_t* offsets,
+    const uint8_t* chars,
+    __int128_t* sums,
+    int64_t* counts,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+
+template void launchPackDecimalSumState<int64_t, int32_t>(
+    const int64_t* sums,
+    const int64_t* counts,
+    const int32_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void launchPackDecimalSumState<int64_t, int64_t>(
+    const int64_t* sums,
+    const int64_t* counts,
+    const int64_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void launchPackDecimalSumState<__int128_t, int32_t>(
+    const __int128_t* sums,
+    const int64_t* counts,
+    const int32_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void launchPackDecimalSumState<__int128_t, int64_t>(
+    const __int128_t* sums,
+    const int64_t* counts,
+    const int64_t* offsets,
+    uint8_t* chars,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+
+template void launchAverageRoundDecimalSum<int64_t>(
+    const int64_t* sums,
+    const int64_t* counts,
+    int64_t* out,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
+template void launchAverageRoundDecimalSum<__int128_t>(
+    const __int128_t* sums,
+    const int64_t* counts,
+    __int128_t* out,
+    cudf::size_type numRows,
+    rmm::cuda_stream_view stream);
 
 } // namespace detail
 } // namespace facebook::velox::cudf_velox
