@@ -64,16 +64,6 @@ void CudfIcebergDataSource::convertSplit(
 
 std::unique_ptr<CudfSplitReader>
 CudfIcebergDataSource::createCudfSplitReader() {
-  SubfieldFilterBuildState subfieldFilterBuildState;
-  if (!subfieldFilters_.empty()) {
-    subfieldFilterBuildState = SubfieldFilterBuildState{
-        .filters = &subfieldFilters_,
-        .tree = &subfieldTree_,
-        .scalars = &subfieldScalars_,
-        .rowType = getTableRowType(),
-        .expr = &subfieldFilterExpr_,
-    };
-  }
   return std::make_unique<CudfIcebergSplitReader>(
       split_,
       icebergSplit_,
@@ -88,7 +78,7 @@ CudfIcebergDataSource::createCudfSplitReader() {
       ioStatistics_,
       ioStats_,
       useExperimentalCudfReader_,
-      std::move(subfieldFilterBuildState));
+      makeSubfieldFilterBuildState());
 }
 
 } // namespace facebook::velox::cudf_velox::connector::hive::iceberg

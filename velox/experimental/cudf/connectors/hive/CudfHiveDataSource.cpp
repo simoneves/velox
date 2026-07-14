@@ -134,16 +134,6 @@ CudfHiveDataSource::CudfHiveDataSource(
 }
 
 std::unique_ptr<CudfSplitReader> CudfHiveDataSource::createCudfSplitReader() {
-  SubfieldFilterBuildState subfieldFilterBuildState;
-  if (!subfieldFilters_.empty()) {
-    subfieldFilterBuildState = SubfieldFilterBuildState{
-        .filters = &subfieldFilters_,
-        .tree = &subfieldTree_,
-        .scalars = &subfieldScalars_,
-        .rowType = getTableRowType(),
-        .expr = &subfieldFilterExpr_,
-    };
-  }
   return std::make_unique<CudfSplitReader>(
       split_,
       tableHandle_,
@@ -156,7 +146,20 @@ std::unique_ptr<CudfSplitReader> CudfHiveDataSource::createCudfSplitReader() {
       ioStatistics_,
       ioStats_,
       useExperimentalCudfReader_,
-      std::move(subfieldFilterBuildState));
+      makeSubfieldFilterBuildState());
+}
+
+SubfieldFilterBuildState CudfHiveDataSource::makeSubfieldFilterBuildState() {
+  if (subfieldFilters_.empty()) {
+    return {};
+  }
+  return SubfieldFilterBuildState{
+      .filters = &subfieldFilters_,
+      .tree = &subfieldTree_,
+      .scalars = &subfieldScalars_,
+      .rowType = getTableRowType(),
+      .expr = &subfieldFilterExpr_,
+  };
 }
 
 void CudfHiveDataSource::convertSplit(std::shared_ptr<ConnectorSplit> split) {
