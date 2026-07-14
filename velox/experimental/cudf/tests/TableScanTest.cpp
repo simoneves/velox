@@ -186,6 +186,29 @@ void writeDecimal32AndInt64ParquetFile(
           .build();
   cudf::io::write_parquet(options, stream);
 }
+
+void writeSingleDecimal32ParquetFile(
+    const std::string& filePath,
+    const RowTypePtr& rowType,
+    const std::vector<int32_t>& decimalValues,
+    int32_t decimalScale,
+    rmm::cuda_stream_view stream) {
+  auto decimalCol =
+      makeDecimal32Column(decimalValues, decimalScale, stream);
+  auto table = std::make_unique<cudf::table>(
+      std::vector<std::unique_ptr<cudf::column>>{std::move(decimalCol)});
+
+  auto sinkInfo = cudf::io::sink_info(filePath);
+  auto tableInputMetadata = cudf::io::table_input_metadata(table->view());
+  for (int32_t i = 0; i < rowType->size(); ++i) {
+    tableInputMetadata.column_metadata[i].set_name(rowType->nameOf(i));
+  }
+  auto options =
+      cudf::io::parquet_writer_options::builder(sinkInfo, table->view())
+          .metadata(tableInputMetadata)
+          .build();
+  cudf::io::write_parquet(options, stream);
+}
 } // namespace
 
 class TableScanTest : public virtual CudfHiveConnectorTestBase {
@@ -1009,4 +1032,39 @@ TEST_F(TableScanTest, decimal32SubfieldFilter) {
       plan,
       {filePath},
       "SELECT c0, c1 FROM tmp WHERE c0 = CAST('-500.00' AS DECIMAL(9, 2))");
+}
+
+// DECIMAL32 Parquet columns with DECIMAL64 literals in multiply filters must
+// widen operands before cuDF binary_operation.
+TEST_F(TableScanTest, decimal32FilterWithMultiply) {
+  auto rowType = ROW({{"d", DECIMAL(9, 2)}});
+  auto filePath = TempFilePath::create();
+  auto stream = cudf::get_default_stream();
+  writeSingleDecimal32ParquetFile(
+      filePath->getPath(), rowType, {1000, 200, 5000}, 2, stream);
+
+  auto vectors = {makeRowVector(
+      {"d"},
+      {makeFlatVector<int64_t>({1000, 200, 5000}, DECIMAL(9, 2))})};
+  createDuckDbTable(vectors);
+
+  auto assignments =
+      facebook::velox::exec::test::HiveConnectorTestBase::allRegularColumns(
+          rowType);
+
+  auto plan = PlanBuilder(pool_.get())
+                  .startTableScan()
+                  .connectorId(kCudfHiveConnectorId)
+                  .outputType(rowType)
+                  .dataColumns(rowType)
+                  .assignments(assignments)
+                  .endTableScan()
+                  .filter(
+                      "d * CAST(0.2 AS DECIMAL(9, 2)) > CAST(1.00 AS DECIMAL(9, 2))")
+                  .planNode();
+
+  assertQuery(
+      plan,
+      {filePath},
+      "SELECT d FROM tmp WHERE d * CAST(0.2 AS DECIMAL(9, 2)) > CAST(1.00 AS DECIMAL(9, 2))");
 }
