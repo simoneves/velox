@@ -39,6 +39,19 @@ std::pair<int128_t, int128_t> getInt128BoundsForType(const TypePtr& type) {
       std::numeric_limits<int128_t>::max()};
 }
 
+template <TypeKind Kind>
+cudf::ast::literal makeSubfieldFilterLiteral(
+    const TypePtr& columnTypePtr,
+    const variant& veloxVariant,
+    std::vector<std::unique_ptr<cudf::scalar>>& scalars) {
+  return makeScalarAndLiteral<Kind>(
+      columnTypePtr,
+      veloxVariant,
+      false,
+      scalars,
+      useCudfDecimal32ForVeloxDecimal(columnTypePtr));
+}
+
 template <
     typename RangeT,
     typename ScalarT,
@@ -147,7 +160,7 @@ std::reference_wrapper<const cudf::ast::expression> buildIntegerRangeExpr(
     auto addLiteral = [&](ValueT value) -> const cudf::ast::expression& {
       variant veloxVariant = static_cast<NativeT>(value);
       const auto& literal =
-          makeScalarAndLiteral<Kind>(columnTypePtr, veloxVariant, scalars);
+          makeSubfieldFilterLiteral<Kind>(columnTypePtr, veloxVariant, scalars);
       return tree.push(literal);
     };
 
@@ -231,7 +244,7 @@ const cudf::ast::expression& buildValuesListExpr(
   for (const auto& value : values) {
     variant veloxVariant = static_cast<ValueT>(value);
     auto const& literal = tree.push(
-        makeScalarAndLiteral<Kind>(columnTypePtr, veloxVariant, scalars));
+        makeSubfieldFilterLiteral<Kind>(columnTypePtr, veloxVariant, scalars));
     auto const& equalExpr = tree.push(
         Operation{isNegated ? Op::NOT_EQUAL : Op::EQUAL, columnRef, literal});
     exprVec.push_back(&equalExpr);
@@ -309,7 +322,7 @@ std::reference_wrapper<const cudf::ast::expression> buildIntegerInListExpr(
 
       variant veloxVariant = static_cast<NativeT>(value);
       const auto& literal =
-          makeScalarAndLiteral<Kind>(columnTypePtr, veloxVariant, scalars);
+          makeSubfieldFilterLiteral<Kind>(columnTypePtr, veloxVariant, scalars);
       auto const& cudfLiteral = tree.push(literal);
       auto const& equalExpr =
           tree.push(Operation{Op::EQUAL, columnRef, cudfLiteral});

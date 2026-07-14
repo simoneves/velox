@@ -27,6 +27,8 @@
 #include <cudf/table/table.hpp>
 #include <cudf/transform.hpp>
 
+#include <cudf/ast/detail/expression_parser.hpp>
+
 #include <gtest/gtest.h>
 
 using namespace facebook::velox;
@@ -563,6 +565,26 @@ TEST_F(SubfieldFilterAstTest, DecimalRange) {
   EXPECT_GT(tree.size(), 0UL);
   auto vec = makeTestVector(rowType, 100);
   testFilterExecution(rowType, columnName, *filter, vec, expr);
+}
+
+TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal32Literals) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, DECIMAL(9, 2)}});
+  auto filter = std::make_unique<common::BigintRange>(
+      int64_t{100}, int64_t{500}, /*nullAllowed*/ false);
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr =
+      createAstFromSubfieldFilter(subfield, *filter, tree, scalars, rowType);
+
+  ASSERT_EQ(scalars.size(), 2UL);
+  EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::DECIMAL32);
+  EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL32);
+  EXPECT_GT(tree.size(), 0UL);
+  EXPECT_NO_THROW(
+      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
 }
 
 TEST_F(SubfieldFilterAstTest, DecimalInList) {

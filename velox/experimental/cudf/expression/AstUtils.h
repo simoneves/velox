@@ -33,6 +33,17 @@
 
 namespace facebook::velox::cudf_velox {
 
+// libcudf Parquet I/O uses DECIMAL32 when precision <= 9 (see parquet_common.hpp).
+constexpr uint8_t kCudfParquetDecimal32MaxPrecision = 9;
+
+inline bool useCudfDecimal32ForVeloxDecimal(const TypePtr& type) {
+  if (!type->isShortDecimal()) {
+    return false;
+  }
+  const auto [precision, _] = getDecimalPrecisionScale(*type);
+  return precision <= kCudfParquetDecimal32MaxPrecision;
+}
+
 template <typename T>
 cudf::ast::literal makeLiteralFromScalar(
     cudf::scalar& scalar,
@@ -40,6 +51,10 @@ cudf::ast::literal makeLiteralFromScalar(
   if constexpr (cudf::is_fixed_width<T>()) {
     if (type->isDecimal()) {
       if (type->kind() == TypeKind::BIGINT) {
+        if (scalar.type().id() == cudf::type_id::DECIMAL32) {
+          using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal32>;
+          return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
+        }
         using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal64>;
         return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
       }
@@ -92,7 +107,8 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
     const TypePtr& type,
     T value,
     bool isNull,
-    std::optional<cudf::type_id> toType = std::nullopt) {
+    std::optional<cudf::type_id> toType = std::nullopt,
+    bool useCudfDecimal32 = false) {
   auto stream = cudf::get_default_stream(cudf::allow_default_stream);
   auto mr = get_temp_mr();
 
@@ -146,6 +162,14 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
             std::dynamic_pointer_cast<const ShortDecimalType>(type);
         VELOX_CHECK(decimalType, "Invalid Decimal Type (failed dynamic_cast)");
         auto const cudfScale = numeric::scale_type{-decimalType->scale()};
+        if (useCudfDecimal32 &&
+            useCudfDecimal32ForVeloxDecimal(type)) {
+          using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal32>;
+          auto scalar = std::make_unique<CudfDecimalType>(
+              static_cast<int32_t>(value), cudfScale, !isNull, stream, mr);
+          stream.synchronize();
+          return scalar;
+        }
         using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal64>;
         auto scalar = std::make_unique<CudfDecimalType>(
             value, cudfScale, !isNull, stream, mr);
@@ -234,16 +258,19 @@ cudf::ast::literal makeScalarAndLiteral(
     const TypePtr& type,
     const variant& var,
     bool isNull,
-    std::vector<std::unique_ptr<cudf::scalar>>& scalars) {
+    std::vector<std::unique_ptr<cudf::scalar>>& scalars,
+    bool useCudfDecimal32 = false) {
   using T = typename TypeTraits<kind>::NativeType;
   if constexpr (cudf::is_fixed_width<T>() || kind == TypeKind::VARCHAR) {
     if (isNull) {
-      auto scalar = makeScalarFromValue<T>(type, T{}, true);
+      auto scalar = makeScalarFromValue<T>(
+          type, T{}, true, std::nullopt, useCudfDecimal32);
       scalars.emplace_back(std::move(scalar));
       return makeLiteralFromScalar<T>(*(scalars.back()), type);
     }
     auto value = var.value<T>();
-    auto scalar = makeScalarFromValue(type, value, false);
+    auto scalar =
+        makeScalarFromValue(type, value, false, std::nullopt, useCudfDecimal32);
     scalars.emplace_back(std::move(scalar));
     return makeLiteralFromScalar<T>(*(scalars.back()), type);
   }
