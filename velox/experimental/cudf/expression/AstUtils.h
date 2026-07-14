@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <optional>
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/CudfNoDefaults.h"
 
@@ -42,6 +43,21 @@ inline bool useCudfDecimal32ForVeloxDecimal(const TypePtr& type) {
   }
   const auto [precision, _] = getDecimalPrecisionScale(*type);
   return precision <= kCudfParquetDecimal32MaxPrecision;
+}
+
+// Subfield filter literals must match the Parquet column's libcudf storage
+// type (DECIMAL32 vs DECIMAL64). When the Parquet schema is unavailable,
+// fall back to the precision heuristic above.
+inline bool useCudfDecimal32ForSubfieldFilter(
+    const TypePtr& type,
+    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+  if (!type->isShortDecimal()) {
+    return false;
+  }
+  if (parquetColumnType.has_value()) {
+    return parquetColumnType.value() == cudf::type_id::DECIMAL32;
+  }
+  return useCudfDecimal32ForVeloxDecimal(type);
 }
 
 template <typename T>

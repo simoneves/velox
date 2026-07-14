@@ -16,6 +16,7 @@
 
 #include "velox/experimental/cudf/exec/ToCudf.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
+#include "velox/experimental/cudf/expression/ParquetSchemaUtils.h"
 #include "velox/experimental/cudf/expression/SubfieldFiltersToAst.h"
 
 #include "velox/dwio/common/tests/utils/BatchMaker.h"
@@ -582,6 +583,27 @@ TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal32Literals) {
   ASSERT_EQ(scalars.size(), 2UL);
   EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::DECIMAL32);
   EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL32);
+  EXPECT_GT(tree.size(), 0UL);
+  EXPECT_NO_THROW(
+      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
+}
+
+TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal64LiteralsFromParquetSchema) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, DECIMAL(9, 2)}});
+  auto filter = std::make_unique<common::BigintRange>(
+      int64_t{100}, int64_t{500}, /*nullAllowed*/ false);
+  ParquetColumnTypeMap parquetTypes{{columnName, cudf::type_id::DECIMAL64}};
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr = createAstFromSubfieldFilter(
+      subfield, *filter, tree, scalars, rowType, &parquetTypes);
+
+  ASSERT_EQ(scalars.size(), 2UL);
+  EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::DECIMAL64);
+  EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL64);
   EXPECT_GT(tree.size(), 0UL);
   EXPECT_NO_THROW(
       cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));

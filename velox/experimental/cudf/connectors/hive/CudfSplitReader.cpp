@@ -18,6 +18,8 @@
 #include "velox/experimental/cudf/connectors/hive/CudfSplitReader.h"
 #include "velox/experimental/cudf/connectors/hive/CudfSplitReaderHelpers.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
+#include "velox/experimental/cudf/expression/ParquetSchemaUtils.h"
+#include "velox/experimental/cudf/expression/SubfieldFiltersToAst.h"
 
 #include "velox/common/caching/CacheTTLController.h"
 #include "velox/common/time/Timer.h"
@@ -74,7 +76,7 @@ CudfSplitReader::CudfSplitReader(
     const std::shared_ptr<io::IoStatistics>& ioStatistics,
     const std::shared_ptr<IoStats>& ioStats,
     bool useExperimentalCudfReader,
-    cudf::ast::expression const* subfieldFilterExpr)
+    SubfieldFilterBuildState subfieldFilterBuildState)
     : NvtxHelper(
           nvtx3::rgb{80, 171, 241},
           std::nullopt,
@@ -92,7 +94,7 @@ CudfSplitReader::CudfSplitReader(
       pool_(connectorQueryCtx->memoryPool()),
       useExperimentalCudfReader_(useExperimentalCudfReader),
       baseReaderOpts_(pool_),
-      subfieldFilterExpr_(subfieldFilterExpr) {
+      subfieldFilterBuildState_(std::move(subfieldFilterBuildState)) {
   baseReaderOpts_.setDataIoStats(ioStatistics_);
   baseReaderOpts_.setMetadataIoStats(ioStatistics_);
 }
@@ -223,7 +225,44 @@ void CudfSplitReader::resetSplit() {
 }
 
 cudf::ast::expression const* CudfSplitReader::subfieldFilter() {
-  return subfieldFilterExpr_;
+  if (hasSubfieldFilters() && subfieldFilterBuildState_.expr != nullptr &&
+      *subfieldFilterBuildState_.expr == nullptr && dataSource_ != nullptr) {
+    buildSubfieldFilterAst();
+  }
+  if (subfieldFilterBuildState_.expr == nullptr ||
+      *subfieldFilterBuildState_.expr == nullptr) {
+    return nullptr;
+  }
+  return *subfieldFilterBuildState_.expr;
+}
+
+bool CudfSplitReader::hasSubfieldFilters() const {
+  return subfieldFilterBuildState_.filters != nullptr &&
+      !subfieldFilterBuildState_.filters->empty();
+}
+
+void CudfSplitReader::buildSubfieldFilterAst() {
+  auto& state = subfieldFilterBuildState_;
+  if (state.filters == nullptr || state.filters->empty()) {
+    return;
+  }
+  VELOX_CHECK_NOT_NULL(state.tree);
+  VELOX_CHECK_NOT_NULL(state.scalars);
+  VELOX_CHECK_NOT_NULL(state.expr);
+  VELOX_CHECK_NOT_NULL(dataSource_);
+
+  *state.tree = cudf::ast::tree{};
+  state.scalars->clear();
+
+  auto sourceInfo = cudf::io::source_info{dataSource_.get()};
+  auto metadata = cudf::io::read_parquet_metadata(sourceInfo);
+  auto parquetColumnTypes = parquetColumnTypesFromMetadata(metadata);
+  *state.expr = &createAstFromSubfieldFilters(
+      *state.filters,
+      *state.tree,
+      *state.scalars,
+      state.rowType,
+      &parquetColumnTypes);
 }
 
 void CudfSplitReader::setupCudfDataSource() {
@@ -344,6 +383,7 @@ void CudfSplitReader::setupReaderOptions() {
     readerOptions_.set_num_bytes(split_->size());
   }
 
+  buildSubfieldFilterAst();
   if (auto* filter = subfieldFilter(); filter != nullptr) {
     readerOptions_.set_filter(*filter);
   }
