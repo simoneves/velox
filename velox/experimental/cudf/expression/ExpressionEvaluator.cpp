@@ -110,44 +110,6 @@ bool decimalScalarIsZero(
   return false;
 }
 
-bool hasDecimalZero(
-    const cudf::column_view& col,
-    rmm::cuda_stream_view stream,
-    rmm::device_async_resource_ref mr) {
-  if (col.is_empty()) {
-    return false;
-  }
-  std::unique_ptr<cudf::scalar> zero;
-  auto scale = numeric::scale_type{col.type().scale()};
-  if (col.type().id() == cudf::type_id::DECIMAL64) {
-    zero =
-        cudf::make_fixed_point_scalar<numeric::decimal64>(0, scale, stream, mr);
-  } else if (col.type().id() == cudf::type_id::DECIMAL128) {
-    zero = cudf::make_fixed_point_scalar<numeric::decimal128>(
-        0, scale, stream, mr);
-  } else {
-    return false;
-  }
-
-  auto equals = cudf::binary_operation(
-      col,
-      *zero,
-      cudf::binary_operator::EQUAL,
-      cudf::data_type{cudf::type_id::BOOL8},
-      stream,
-      mr);
-  auto anyAgg = cudf::make_any_aggregation<cudf::reduce_aggregation>();
-  auto anyScalar = cudf::reduce(
-      equals->view(),
-      *anyAgg,
-      cudf::data_type{cudf::type_id::BOOL8},
-      stream,
-      mr);
-  auto const& boolScalar =
-      static_cast<cudf::numeric_scalar<bool> const&>(*anyScalar);
-  return boolScalar.is_valid(stream) && boolScalar.value(stream);
-}
-
 std::unique_ptr<cudf::scalar> castDecimalScalar(
     const cudf::scalar& src,
     cudf::data_type targetType,
