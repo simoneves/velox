@@ -373,6 +373,7 @@ void CudfSplitReader::setupReaderOptions() {
           .allow_mismatched_pq_schemas(
               cudfHiveConfig_->isAllowMismatchedCudfHiveSchemas())
           .timestamp_type(cudfHiveConfig_->timestampType())
+          .case_sensitive_names(false)
           .build();
 
   // Set skip_bytes and num_bytes if available
@@ -383,14 +384,13 @@ void CudfSplitReader::setupReaderOptions() {
     readerOptions_.set_num_bytes(split_->size());
   }
 
+  if (readColumnNames_.size()) {
+    readerOptions_.set_column_names(readColumnNames_);
+  }
+
   buildSubfieldFilterAst();
   if (auto* filter = subfieldFilter(); filter != nullptr) {
     readerOptions_.set_filter(*filter);
-  }
-
-  // Set column projection if needed
-  if (readColumnNames_.size()) {
-    readerOptions_.set_column_names(readColumnNames_);
   }
 }
 

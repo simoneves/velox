@@ -44,13 +44,13 @@ cudf::ast::literal makeSubfieldFilterLiteral(
     const TypePtr& columnTypePtr,
     const variant& veloxVariant,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   return makeScalarAndLiteral<Kind>(
       columnTypePtr,
       veloxVariant,
       false,
       scalars,
-      useCudfDecimal32ForSubfieldFilter(columnTypePtr, parquetColumnType));
+      parquetColumnType);
 }
 
 template <
@@ -131,7 +131,7 @@ std::reference_wrapper<const cudf::ast::expression> buildIntegerRangeExpr(
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const cudf::ast::expression& columnRef,
     const TypePtr& columnTypePtr,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   using NativeT = typename TypeTraits<Kind>::NativeType;
 
   if constexpr (
@@ -212,7 +212,7 @@ std::reference_wrapper<const cudf::ast::expression> buildBigintRangeExpr(
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const cudf::ast::expression& columnRef,
     const TypePtr& columnTypePtr,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   return buildIntegerRangeExpr<Kind, common::BigintRange>(
       filter, tree, scalars, columnRef, columnTypePtr, parquetColumnType);
 }
@@ -223,7 +223,7 @@ std::reference_wrapper<const cudf::ast::expression> buildHugeintRangeExpr(
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const cudf::ast::expression& columnRef,
     const TypePtr& columnTypePtr,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   return buildIntegerRangeExpr<TypeKind::HUGEINT, common::HugeintRange>(
       filter, tree, scalars, columnRef, columnTypePtr, parquetColumnType);
 }
@@ -236,7 +236,7 @@ const cudf::ast::expression& buildValuesListExpr(
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const TypePtr& columnTypePtr,
     bool isNegated = false,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   using Op = cudf::ast::ast_operator;
   using Operation = cudf::ast::operation;
 
@@ -305,7 +305,7 @@ std::reference_wrapper<const cudf::ast::expression> buildIntegerInListExpr(
     rmm::cuda_stream_view /*stream*/,
     rmm::device_async_resource_ref /*mr*/,
     const TypePtr& columnTypePtr,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   using NativeT = typename TypeTraits<Kind>::NativeType;
 
   if constexpr (std::is_integral_v<NativeT>) {
@@ -378,12 +378,10 @@ cudf::ast::expression const& createAstFromSubfieldFilter(
     VELOX_FAIL("Field '{}' not found in input schema", fieldName);
   }
 
-  std::optional<cudf::type_id> parquetColumnType;
+  std::optional<cudf::data_type> parquetColumnType;
   if (parquetColumnTypes != nullptr) {
-    auto it = parquetColumnTypes->find(fieldName);
-    if (it != parquetColumnTypes->end()) {
-      parquetColumnType = it->second;
-    }
+    parquetColumnType =
+        lookupParquetColumnType(*parquetColumnTypes, fieldName);
   }
 
   auto columnIndex = inputRowSchema->getChildIdx(fieldName);

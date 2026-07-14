@@ -18,6 +18,7 @@
 #include <optional>
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/CudfNoDefaults.h"
+#include "velox/experimental/cudf/expression/ParquetSchemaUtils.h"
 
 #include "velox/expression/ConstantExpr.h"
 #include "velox/type/Timestamp.h"
@@ -45,19 +46,51 @@ inline bool useCudfDecimal32ForVeloxDecimal(const TypePtr& type) {
   return precision <= kCudfParquetDecimal32MaxPrecision;
 }
 
-// Subfield filter literals must match the Parquet column's libcudf storage
-// type (DECIMAL32 vs DECIMAL64). When the Parquet schema is unavailable,
-// fall back to the precision heuristic above.
-inline bool useCudfDecimal32ForSubfieldFilter(
+inline cudf::type_id veloxDecimalFallbackStorageType(const TypePtr& type) {
+  if (type->isShortDecimal()) {
+    return useCudfDecimal32ForVeloxDecimal(type) ? cudf::type_id::DECIMAL32
+                                                 : cudf::type_id::DECIMAL64;
+  }
+  if (type->isLongDecimal()) {
+    const auto [precision, _] = getDecimalPrecisionScale(*type);
+    return precision <= 18 ? cudf::type_id::DECIMAL64 : cudf::type_id::DECIMAL128;
+  }
+  VELOX_FAIL("Type is not decimal: {}", type->toString());
+}
+
+inline bool isParquetIntegerDecimalStorage(cudf::type_id typeId) {
+  return typeId == cudf::type_id::INT32 || typeId == cudf::type_id::INT64;
+}
+
+inline std::pair<cudf::type_id, numeric::scale_type> decimalStorageTypeAndScale(
     const TypePtr& type,
-    std::optional<cudf::type_id> parquetColumnType = std::nullopt) {
-  if (!type->isShortDecimal()) {
-    return false;
-  }
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   if (parquetColumnType.has_value()) {
-    return parquetColumnType.value() == cudf::type_id::DECIMAL32;
+    const auto parquetId = parquetColumnType->id();
+    if (isParquetDecimalType(parquetId)) {
+      return {parquetId,
+              numeric::scale_type{parquetColumnType->scale()}};
+    }
+    // Some Parquet files store scaled decimals as plain integers without a
+    // DECIMAL logical type. Bloom filters require literals to match that
+    // physical storage exactly.
+    if (type->isDecimal() && isParquetIntegerDecimalStorage(parquetId)) {
+      return {parquetId, numeric::scale_type{0}};
+    }
   }
-  return useCudfDecimal32ForVeloxDecimal(type);
+
+  const auto [_, veloxScale] = getDecimalPrecisionScale(*type);
+  return {veloxDecimalFallbackStorageType(type),
+          numeric::scale_type{-veloxScale}};
+}
+
+inline cudf::type_id timestampUnitFromParquetColumnType(
+    std::optional<cudf::data_type> parquetColumnType) {
+  if (!parquetColumnType.has_value() ||
+      !cudf::is_timestamp(*parquetColumnType)) {
+    return CudfConfig::getInstance().timestampUnit;
+  }
+  return parquetColumnType->id();
 }
 
 template <typename T>
@@ -66,20 +99,32 @@ cudf::ast::literal makeLiteralFromScalar(
     const TypePtr& type) {
   if constexpr (cudf::is_fixed_width<T>()) {
     if (type->isDecimal()) {
-      if (type->kind() == TypeKind::BIGINT) {
-        if (scalar.type().id() == cudf::type_id::DECIMAL32) {
+      switch (scalar.type().id()) {
+        case cudf::type_id::DECIMAL32: {
           using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal32>;
           return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
         }
-        using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal64>;
-        return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
+        case cudf::type_id::DECIMAL64: {
+          using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal64>;
+          return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
+        }
+        case cudf::type_id::DECIMAL128: {
+          using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal128>;
+          return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
+        }
+        case cudf::type_id::INT32: {
+          using CudfScalarType = cudf::numeric_scalar<int32_t>;
+          return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
+        }
+        case cudf::type_id::INT64: {
+          using CudfScalarType = cudf::numeric_scalar<int64_t>;
+          return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
+        }
+        default:
+          VELOX_FAIL(
+              "Unsupported scalar type for decimal literal: {}",
+              static_cast<int32_t>(scalar.type().id()));
       }
-      if (type->kind() == TypeKind::HUGEINT) {
-        using CudfScalarType = cudf::fixed_point_scalar<numeric::decimal128>;
-        return cudf::ast::literal{*static_cast<CudfScalarType*>(&scalar)};
-      }
-      VELOX_UNREACHABLE(
-          "Invalid Decimal Type (bad TypeKind: {})", type->kind());
     } else if (type->isIntervalDayTime()) {
       using CudfDurationType = cudf::duration_ms;
       if constexpr (std::is_same_v<T, CudfDurationType::rep>) {
@@ -124,7 +169,7 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
     T value,
     bool isNull,
     std::optional<cudf::type_id> toType = std::nullopt,
-    bool useCudfDecimal32 = false) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   auto stream = cudf::get_default_stream(cudf::allow_default_stream);
   auto mr = get_temp_mr();
 
@@ -136,7 +181,7 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
   // cheap (one-time cost per scalar) and guarantees the memory is
   // available on every stream.
   if constexpr (std::is_same_v<T, Timestamp>) {
-    auto unit = CudfConfig::getInstance().timestampUnit;
+    auto unit = timestampUnitFromParquetColumnType(parquetColumnType);
     if (unit == cudf::type_id::TIMESTAMP_MICROSECONDS) {
       using CudfTimestampType = cudf::timestamp_us;
       auto micros = isNull ? 0 : value.toMicros();
@@ -172,38 +217,44 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
     if (type->isDecimal()) {
       // Velox DECIMAL scale is positive for fractional digits
       // cuDF scale is negative for fractional digits
-      // @TODO check the bigger picture here!
-      if (type->kind() == TypeKind::BIGINT) {
-        auto const decimalType =
-            std::dynamic_pointer_cast<const ShortDecimalType>(type);
-        VELOX_CHECK(decimalType, "Invalid Decimal Type (failed dynamic_cast)");
-        auto const cudfScale = numeric::scale_type{-decimalType->scale()};
-        if (useCudfDecimal32 &&
-            useCudfDecimal32ForVeloxDecimal(type)) {
-          using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal32>;
-          auto scalar = std::make_unique<CudfDecimalType>(
-              static_cast<int32_t>(value), cudfScale, !isNull, stream, mr);
-          stream.synchronize();
-          return scalar;
-        }
-        using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal64>;
+      const auto [storageType, cudfScale] =
+          decimalStorageTypeAndScale(type, parquetColumnType);
+      if (storageType == cudf::type_id::DECIMAL32) {
+        using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal32>;
         auto scalar = std::make_unique<CudfDecimalType>(
-            value, cudfScale, !isNull, stream, mr);
-        stream.synchronize();
-        return scalar;
-      } else if (type->kind() == TypeKind::HUGEINT) {
-        auto const decimalType =
-            std::dynamic_pointer_cast<const LongDecimalType>(type);
-        VELOX_CHECK(decimalType, "Invalid Decimal Type (failed dynamic_cast)");
-        auto const cudfScale = numeric::scale_type{-decimalType->scale()};
-        using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal128>;
-        auto scalar = std::make_unique<CudfDecimalType>(
-            value, cudfScale, !isNull, stream, mr);
+            static_cast<int32_t>(value), cudfScale, !isNull, stream, mr);
         stream.synchronize();
         return scalar;
       }
-      VELOX_UNREACHABLE(
-          "Invalid Decimal Type (bad TypeKind: {})", type->kind());
+      if (storageType == cudf::type_id::DECIMAL64) {
+        using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal64>;
+        auto scalar = std::make_unique<CudfDecimalType>(
+            static_cast<int64_t>(value), cudfScale, !isNull, stream, mr);
+        stream.synchronize();
+        return scalar;
+      }
+      if (storageType == cudf::type_id::DECIMAL128) {
+        using CudfDecimalType = cudf::fixed_point_scalar<numeric::decimal128>;
+        auto scalar = std::make_unique<CudfDecimalType>(
+            static_cast<int128_t>(value), cudfScale, !isNull, stream, mr);
+        stream.synchronize();
+        return scalar;
+      }
+      if (storageType == cudf::type_id::INT64) {
+        auto scalar = std::make_unique<cudf::numeric_scalar<int64_t>>(
+            static_cast<int64_t>(value), !isNull, stream, mr);
+        stream.synchronize();
+        return scalar;
+      }
+      if (storageType == cudf::type_id::INT32) {
+        auto scalar = std::make_unique<cudf::numeric_scalar<int32_t>>(
+            static_cast<int32_t>(value), !isNull, stream, mr);
+        stream.synchronize();
+        return scalar;
+      }
+      VELOX_FAIL(
+          "Unsupported decimal storage type {}",
+          static_cast<int32_t>(storageType));
     } else if (type->isIntervalYearMonth()) {
       VELOX_FAIL("Interval year month not supported");
     } else if (type->isIntervalDayTime()) {
@@ -275,18 +326,18 @@ cudf::ast::literal makeScalarAndLiteral(
     const variant& var,
     bool isNull,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
-    bool useCudfDecimal32 = false) {
+    std::optional<cudf::data_type> parquetColumnType = std::nullopt) {
   using T = typename TypeTraits<kind>::NativeType;
   if constexpr (cudf::is_fixed_width<T>() || kind == TypeKind::VARCHAR) {
     if (isNull) {
       auto scalar = makeScalarFromValue<T>(
-          type, T{}, true, std::nullopt, useCudfDecimal32);
+          type, T{}, true, std::nullopt, parquetColumnType);
       scalars.emplace_back(std::move(scalar));
       return makeLiteralFromScalar<T>(*(scalars.back()), type);
     }
     auto value = var.value<T>();
-    auto scalar =
-        makeScalarFromValue(type, value, false, std::nullopt, useCudfDecimal32);
+    auto scalar = makeScalarFromValue(
+        type, value, false, std::nullopt, parquetColumnType);
     scalars.emplace_back(std::move(scalar));
     return makeLiteralFromScalar<T>(*(scalars.back()), type);
   }

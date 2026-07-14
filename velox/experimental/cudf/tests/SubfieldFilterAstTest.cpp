@@ -29,6 +29,7 @@
 #include <cudf/transform.hpp>
 
 #include <cudf/ast/detail/expression_parser.hpp>
+#include <cudf/fixed_point/fixed_point.hpp>
 
 #include <gtest/gtest.h>
 
@@ -593,7 +594,8 @@ TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal64LiteralsFromParquet
   auto rowType = ROW({{columnName, DECIMAL(9, 2)}});
   auto filter = std::make_unique<common::BigintRange>(
       int64_t{100}, int64_t{500}, /*nullAllowed*/ false);
-  ParquetColumnTypeMap parquetTypes{{columnName, cudf::type_id::DECIMAL64}};
+  ParquetColumnTypeMap parquetTypes{
+      {columnName, cudf::data_type{cudf::type_id::DECIMAL64, -2}}};
 
   common::Subfield subfield(columnName);
   cudf::ast::tree tree;
@@ -603,7 +605,54 @@ TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal64LiteralsFromParquet
 
   ASSERT_EQ(scalars.size(), 2UL);
   EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::DECIMAL64);
+  EXPECT_EQ(scalars[0]->type().scale(), numeric::scale_type{-2});
   EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL64);
+  EXPECT_EQ(scalars[1]->type().scale(), numeric::scale_type{-2});
+  EXPECT_GT(tree.size(), 0UL);
+  EXPECT_NO_THROW(
+      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
+}
+
+TEST_F(SubfieldFilterAstTest, LongDecimalFilterUsesDecimal64LiteralsFromParquetSchema) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, DECIMAL(18, 2)}});
+  auto filter = std::make_unique<common::HugeintRange>(
+      int128_t{100}, int128_t{500}, /*nullAllowed*/ false);
+  ParquetColumnTypeMap parquetTypes{
+      {columnName, cudf::data_type{cudf::type_id::DECIMAL64, -2}}};
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr = createAstFromSubfieldFilter(
+      subfield, *filter, tree, scalars, rowType, &parquetTypes);
+
+  ASSERT_EQ(scalars.size(), 2UL);
+  EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::DECIMAL64);
+  EXPECT_EQ(scalars[0]->type().scale(), numeric::scale_type{-2});
+  EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL64);
+  EXPECT_EQ(scalars[1]->type().scale(), numeric::scale_type{-2});
+  EXPECT_GT(tree.size(), 0UL);
+  EXPECT_NO_THROW(
+      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
+}
+
+TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesInt64LiteralsFromParquetSchema) {
+  const std::string columnName = "c0";
+  auto rowType = ROW({{columnName, DECIMAL(9, 2)}});
+  auto filter = std::make_unique<common::BigintRange>(
+      int64_t{100}, int64_t{500}, /*nullAllowed*/ false);
+  ParquetColumnTypeMap parquetTypes{{columnName, cudf::data_type{cudf::type_id::INT64}}};
+
+  common::Subfield subfield(columnName);
+  cudf::ast::tree tree;
+  std::vector<std::unique_ptr<cudf::scalar>> scalars;
+  const auto& expr = createAstFromSubfieldFilter(
+      subfield, *filter, tree, scalars, rowType, &parquetTypes);
+
+  ASSERT_EQ(scalars.size(), 2UL);
+  EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::INT64);
+  EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::INT64);
   EXPECT_GT(tree.size(), 0UL);
   EXPECT_NO_THROW(
       cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
