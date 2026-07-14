@@ -43,7 +43,11 @@
 #include "velox/type/Type.h"
 #include "velox/type/tests/SubfieldFiltersBuilder.h"
 
+#include <cudf/column/column_factories.hpp>
 #include <cudf/io/parquet.hpp>
+#include <cudf/table/table.hpp>
+
+#include <cuda_runtime_api.h>
 
 #include <fmt/ranges.h>
 
@@ -87,6 +91,69 @@ StatsFilterMetrics readParquetWithStatsFilter(
       result.metadata.num_input_row_groups,
       result.metadata.num_row_groups_after_stats_filter,
       result.tbl->num_rows()};
+}
+
+template <typename T>
+void copyHostToDeviceColumn(
+    cudf::column_view& view,
+    const std::vector<T>& values,
+    rmm::cuda_stream_view stream) {
+  if (values.empty()) {
+    return;
+  }
+  auto status = cudaMemcpyAsync(
+      view.data<T>(),
+      values.data(),
+      values.size() * sizeof(T),
+      cudaMemcpyHostToDevice,
+      stream.value());
+  VELOX_CHECK_EQ(0, static_cast<int>(status));
+  stream.synchronize();
+}
+
+std::unique_ptr<cudf::column> makeDecimal32Column(
+    const std::vector<int32_t>& values,
+    int32_t scale,
+    rmm::cuda_stream_view stream) {
+  cudf::data_type type{cudf::type_id::DECIMAL32, -scale};
+  auto col = cudf::make_fixed_width_column(
+      type,
+      static_cast<cudf::size_type>(values.size()),
+      cudf::mask_state::UNALLOCATED,
+      stream);
+  copyHostToDeviceColumn(col->mutable_view(), values, stream);
+  return col;
+}
+
+void writeDecimal32ParquetFile(
+    const std::string& filePath,
+    const RowTypePtr& rowType,
+    const std::vector<int8_t>& condValues,
+    const std::vector<int32_t>& decimalValues,
+    int32_t decimalScale,
+    rmm::cuda_stream_view stream) {
+  auto condCol = cudf::make_fixed_width_column(
+      cudf::data_type{cudf::type_id::BOOL8},
+      static_cast<cudf::size_type>(condValues.size()),
+      cudf::mask_state::UNALLOCATED,
+      stream);
+  copyHostToDeviceColumn(condCol->mutable_view(), condValues, stream);
+  auto decimalCol =
+      makeDecimal32Column(decimalValues, decimalScale, stream);
+  auto table = std::make_unique<cudf::table>(
+      std::vector<std::unique_ptr<cudf::column>>{std::move(condCol),
+                                                 std::move(decimalCol)});
+
+  auto sinkInfo = cudf::io::sink_info(filePath);
+  auto tableInputMetadata = cudf::io::table_input_metadata(table->view());
+  for (int32_t i = 0; i < rowType->size(); ++i) {
+    tableInputMetadata.column_metadata[i].set_name(rowType->nameOf(i));
+  }
+  auto options =
+      cudf::io::parquet_writer_options::builder(sinkInfo, table->view())
+          .metadata(tableInputMetadata)
+          .build();
+  cudf::io::write_parquet(options, stream);
 }
 } // namespace
 
@@ -817,4 +884,47 @@ TEST_F(TableScanTest, decimalRemainingFilter) {
       plan,
       {filePath},
       "SELECT c0, c1 FROM tmp WHERE c0 = CAST('-5.00' AS DECIMAL(5, 2))");
+}
+
+// Parquet I/O stores small decimals as DECIMAL32 while Velox literals become
+// DECIMAL64 in cuDF. IF/CASE must widen operands before copy_if_else.
+TEST_F(TableScanTest, decimal32IfWithLiteral) {
+  auto rowType = ROW({{"cond", BOOLEAN()}, {"d", DECIMAL(9, 2)}});
+  auto filePath = TempFilePath::create();
+  auto stream = cudf::get_default_stream();
+  writeDecimal32ParquetFile(
+      filePath->getPath(),
+      rowType,
+      {1, 0, 1, 0},
+      {1000, 2000, 3000, 4000},
+      2,
+      stream);
+
+  auto vectors = {makeRowVector(
+      {"cond", "d"},
+      {
+          makeFlatVector<bool>({true, false, true, false}),
+          makeFlatVector<int64_t>({1000, 2000, 3000, 4000}, DECIMAL(9, 2)),
+      })};
+  createDuckDbTable(vectors);
+
+  auto assignments =
+      facebook::velox::exec::test::HiveConnectorTestBase::allRegularColumns(
+          rowType);
+
+  auto plan = PlanBuilder(pool_.get())
+                  .startTableScan()
+                  .connectorId(kCudfHiveConnectorId)
+                  .outputType(rowType)
+                  .dataColumns(rowType)
+                  .assignments(assignments)
+                  .endTableScan()
+                  .project(
+                      {"if(cond, CAST('5.00' AS DECIMAL(9, 2)), d) AS result"})
+                  .planNode();
+
+  assertQuery(
+      plan,
+      {filePath},
+      "SELECT IF(cond, CAST('5.00' AS DECIMAL(9, 2)), d) AS result FROM tmp");
 }
