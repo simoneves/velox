@@ -16,6 +16,7 @@
 
 #include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationHostOps.h"
+#include "velox/experimental/cudf/exec/DecimalAggregationDevice.h"
 #include "velox/experimental/cudf/exec/DecimalAggregationState.h"
 #include "velox/experimental/cudf/exec/ToCudf.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
@@ -1125,6 +1126,45 @@ TEST_F(CudfDecimalTest, decimalDeserializeSumStateDecimal64) {
       serializeDecimalSumState(sumCol->view(), countCol->view(), stream, mr);
   auto sumAndCount = deserializeDecimalSumState(stateCol->view(), 2, stream);
   auto stateMask = copyNullMask(stateCol->view(), stream);
+  auto sumMask = copyNullMask(sumAndCount.sum->view(), stream);
+  EXPECT_EQ(stateMask, sumMask);
+
+  auto outSum = copyColumnData<__int128_t>(sumAndCount.sum->view(), stream);
+  for (size_t i = 0; i < sums.size(); ++i) {
+    bool expectedValid = sumValid[i] && countValid[i] && counts[i] != 0;
+    EXPECT_EQ(isValidAt(sumMask, i), expectedValid);
+    if (expectedValid) {
+      EXPECT_EQ(outSum[i], static_cast<__int128_t>(sums[i]));
+    }
+  }
+}
+
+TEST_F(CudfDecimalTest, decimalDeserializeSumStateAfterVarbinaryRoundTrip) {
+  auto stream = cudf::get_default_stream();
+  auto mr = cudf::get_current_device_resource_ref();
+  std::vector<int64_t> sums = {100, -200, 300, 400};
+  std::vector<int64_t> counts = {1, 0, 2, 3};
+  std::vector<bool> sumValid = {true, true, false, true};
+  std::vector<bool> countValid = {true, true, true, false};
+
+  auto sumCol = makeDecimalColumn<int64_t>(sums, 2, &sumValid, stream);
+  auto countCol = makeInt64Column(counts, &countValid, stream);
+  auto stateCol =
+      serializeDecimalSumState(sumCol->view(), countCol->view(), stream, mr);
+
+  auto rowType = ROW({{"state", VARBINARY()}});
+  auto velox = with_arrow::toVeloxColumn(
+      stateCol->view(), pool(), rowType, "rt_", stream, mr);
+  auto cudfAgain = with_arrow::toCudfTable(velox, pool(), stream, mr);
+
+  cudf::strings_column_view strings(cudfAgain->column(0));
+  EXPECT_LT(
+      strings.chars_size(stream),
+      static_cast<int64_t>(sums.size()) * detail::kDecimalSumStateSize);
+
+  auto sumAndCount =
+      deserializeDecimalSumState(cudfAgain->column(0), 2, stream);
+  auto stateMask = copyNullMask(cudfAgain->column(0), stream);
   auto sumMask = copyNullMask(sumAndCount.sum->view(), stream);
   EXPECT_EQ(stateMask, sumMask);
 
