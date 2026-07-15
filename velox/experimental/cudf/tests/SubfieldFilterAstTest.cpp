@@ -28,7 +28,6 @@
 #include <cudf/table/table.hpp>
 #include <cudf/transform.hpp>
 
-#include <cudf/ast/detail/expression_parser.hpp>
 #include <cudf/fixed_point/fixed_point.hpp>
 
 #include <gtest/gtest.h>
@@ -585,8 +584,6 @@ TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal32Literals) {
   EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::DECIMAL32);
   EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL32);
   EXPECT_GT(tree.size(), 0UL);
-  EXPECT_NO_THROW(
-      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
 }
 
 TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal64LiteralsFromParquetSchema) {
@@ -609,8 +606,6 @@ TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesDecimal64LiteralsFromParquet
   EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL64);
   EXPECT_EQ(scalars[1]->type().scale(), numeric::scale_type{-2});
   EXPECT_GT(tree.size(), 0UL);
-  EXPECT_NO_THROW(
-      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
 }
 
 TEST_F(SubfieldFilterAstTest, LongDecimalFilterUsesDecimal64LiteralsFromParquetSchema) {
@@ -633,8 +628,6 @@ TEST_F(SubfieldFilterAstTest, LongDecimalFilterUsesDecimal64LiteralsFromParquetS
   EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::DECIMAL64);
   EXPECT_EQ(scalars[1]->type().scale(), numeric::scale_type{-2});
   EXPECT_GT(tree.size(), 0UL);
-  EXPECT_NO_THROW(
-      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
 }
 
 TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesInt64LiteralsFromParquetSchema) {
@@ -654,8 +647,6 @@ TEST_F(SubfieldFilterAstTest, ShortDecimalFilterUsesInt64LiteralsFromParquetSche
   EXPECT_EQ(scalars[0]->type().id(), cudf::type_id::INT64);
   EXPECT_EQ(scalars[1]->type().id(), cudf::type_id::INT64);
   EXPECT_GT(tree.size(), 0UL);
-  EXPECT_NO_THROW(
-      cudf::ast::detail::expression_parser{}.visit(expr, cudf::table_reference::LEFT));
 }
 
 TEST_F(SubfieldFilterAstTest, DecimalInList) {

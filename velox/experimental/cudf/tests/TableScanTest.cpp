@@ -95,7 +95,7 @@ StatsFilterMetrics readParquetWithStatsFilter(
 
 template <typename T>
 void copyHostToDeviceColumn(
-    cudf::column_view& view,
+    cudf::mutable_column_view view,
     const std::vector<T>& values,
     rmm::cuda_stream_view stream) {
   if (values.empty()) {
@@ -140,9 +140,10 @@ void writeDecimal32ParquetFile(
   copyHostToDeviceColumn(condCol->mutable_view(), condValues, stream);
   auto decimalCol =
       makeDecimal32Column(decimalValues, decimalScale, stream);
-  auto table = std::make_unique<cudf::table>(
-      std::vector<std::unique_ptr<cudf::column>>{std::move(condCol),
-                                                 std::move(decimalCol)});
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  columns.push_back(std::move(condCol));
+  columns.push_back(std::move(decimalCol));
+  auto table = std::make_unique<cudf::table>(std::move(columns));
 
   auto sinkInfo = cudf::io::sink_info(filePath);
   auto tableInputMetadata = cudf::io::table_input_metadata(table->view());
@@ -171,9 +172,10 @@ void writeDecimal32AndInt64ParquetFile(
       cudf::mask_state::UNALLOCATED,
       stream);
   copyHostToDeviceColumn(intCol->mutable_view(), intValues, stream);
-  auto table = std::make_unique<cudf::table>(
-      std::vector<std::unique_ptr<cudf::column>>{std::move(decimalCol),
-                                                 std::move(intCol)});
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  columns.push_back(std::move(decimalCol));
+  columns.push_back(std::move(intCol));
+  auto table = std::make_unique<cudf::table>(std::move(columns));
 
   auto sinkInfo = cudf::io::sink_info(filePath);
   auto tableInputMetadata = cudf::io::table_input_metadata(table->view());
@@ -195,8 +197,9 @@ void writeSingleDecimal32ParquetFile(
     rmm::cuda_stream_view stream) {
   auto decimalCol =
       makeDecimal32Column(decimalValues, decimalScale, stream);
-  auto table = std::make_unique<cudf::table>(
-      std::vector<std::unique_ptr<cudf::column>>{std::move(decimalCol)});
+  std::vector<std::unique_ptr<cudf::column>> columns;
+  columns.push_back(std::move(decimalCol));
+  auto table = std::make_unique<cudf::table>(std::move(columns));
 
   auto sinkInfo = cudf::io::sink_info(filePath);
   auto tableInputMetadata = cudf::io::table_input_metadata(table->view());

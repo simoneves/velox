@@ -1153,18 +1153,19 @@ TEST_F(CudfDecimalTest, decimalDeserializeSumStateAfterVarbinaryRoundTrip) {
       serializeDecimalSumState(sumCol->view(), countCol->view(), stream, mr);
 
   auto rowType = ROW({{"state", VARBINARY()}});
+  cudf::table_view stateTable{{stateCol->view()}};
   auto velox = with_arrow::toVeloxColumn(
-      stateCol->view(), pool(), rowType, "rt_", stream, mr);
+      stateTable, pool(), rowType, "rt_", stream, mr);
   auto cudfAgain = with_arrow::toCudfTable(velox, pool(), stream, mr);
+  auto const stateView = cudfAgain->view().column(0);
 
-  cudf::strings_column_view strings(cudfAgain->column(0));
+  cudf::strings_column_view strings(stateView);
   EXPECT_LT(
       strings.chars_size(stream),
       static_cast<int64_t>(sums.size()) * detail::kDecimalSumStateSize);
 
-  auto sumAndCount =
-      deserializeDecimalSumState(cudfAgain->column(0), 2, stream);
-  auto stateMask = copyNullMask(cudfAgain->column(0), stream);
+  auto sumAndCount = deserializeDecimalSumState(stateView, 2, stream);
+  auto stateMask = copyNullMask(stateView, stream);
   auto sumMask = copyNullMask(sumAndCount.sum->view(), stream);
   EXPECT_EQ(stateMask, sumMask);
 
