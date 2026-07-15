@@ -1063,11 +1063,11 @@ TEST_F(TableScanTest, decimal32FilterWithMultiply) {
                   .assignments(assignments)
                   .endTableScan()
                   .filter(
-                      "d * CAST(0.2 AS DECIMAL(9, 2)) > CAST(1.00 AS DECIMAL(9, 2))")
+                      "d * CAST(0.2 AS DECIMAL(9, 2)) > CAST(1.00 AS DECIMAL(18, 4))")
                   .planNode();
 
   assertQuery(
       plan,
       {filePath},
-      "SELECT d FROM tmp WHERE d * CAST(0.2 AS DECIMAL(9, 2)) > CAST(1.00 AS DECIMAL(9, 2))");
+      "SELECT d FROM tmp WHERE d * CAST(0.2 AS DECIMAL(9, 2)) > CAST(1.00 AS DECIMAL(18, 4))");
 }
