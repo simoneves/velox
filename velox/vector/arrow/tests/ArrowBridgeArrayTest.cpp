@@ -1285,6 +1285,9 @@ class ArrowBridgeArrayImportTest : public ArrowBridgeArrayExportTest {
           }
         }
         assertVectorContent(widenedValues, output, arrowArray.null_count);
+      } else if (format[0] == 't' && format[1] == 't') {
+        assertTimeVectorContent(
+            inputValues, output, arrowArray.null_count, format);
       } else {
         assertVectorContent(inputValues, output, arrowArray.null_count);
       }
