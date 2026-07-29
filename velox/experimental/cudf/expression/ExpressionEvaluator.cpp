@@ -1093,7 +1093,9 @@ class UnaryFunction : public CudfFunction {
 
 class BetweenFunction : public CudfFunction {
  public:
-  BetweenFunction(const std::shared_ptr<velox::exec::Expr>& expr) {
+  BetweenFunction(const std::shared_ptr<velox::exec::Expr>& expr)
+      : operandType_(
+            cudf_velox::veloxToCudfDataType(expr->inputs()[0]->type())) {
     // must have exactly three inputs: value, min, max
     VELOX_CHECK_EQ(
         expr->inputs().size(), 3, "Between function expects exactly 3 inputs");
@@ -1123,40 +1125,53 @@ class BetweenFunction : public CudfFunction {
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr) const override {
     // return (value >= min) && (value <= max)
-    std::unique_ptr<cudf::column> geResultColumn, leResultColumn;
+    std::unique_ptr<cudf::column> valueColumn;
+    std::unique_ptr<cudf::column> minColumn;
+    std::unique_ptr<cudf::column> maxColumn;
+    std::unique_ptr<cudf::scalar> minScalar;
+    std::unique_ptr<cudf::scalar> maxScalar;
+    std::unique_ptr<cudf::column> geResultColumn;
+    std::unique_ptr<cudf::column> leResultColumn;
+    auto const value =
+        columnWithType(inputColumns[0], operandType_, valueColumn, stream, mr);
+    size_t nextInput = 1;
+
     if (minLiteral_) {
+      auto const* min =
+          scalarWithType(*minLiteral_, operandType_, minScalar, stream, mr);
       geResultColumn = cudf::binary_operation(
-          asView(inputColumns[0]),
-          *minLiteral_,
+          value,
+          *min,
           cudf::binary_operator::GREATER_EQUAL,
           kBoolType,
           stream,
           mr);
     } else {
+      auto const min = columnWithType(
+          inputColumns[nextInput++], operandType_, minColumn, stream, mr);
       geResultColumn = cudf::binary_operation(
-          asView(inputColumns[0]),
-          asView(inputColumns[1]),
+          value,
+          min,
           cudf::binary_operator::GREATER_EQUAL,
           kBoolType,
           stream,
           mr);
     }
     if (maxLiteral_) {
+      auto const* max =
+          scalarWithType(*maxLiteral_, operandType_, maxScalar, stream, mr);
       leResultColumn = cudf::binary_operation(
-          asView(inputColumns[0]),
-          *maxLiteral_,
+          value,
+          *max,
           cudf::binary_operator::LESS_EQUAL,
           kBoolType,
           stream,
           mr);
     } else {
+      auto const max = columnWithType(
+          inputColumns[nextInput++], operandType_, maxColumn, stream, mr);
       leResultColumn = cudf::binary_operation(
-          asView(inputColumns[0]),
-          asView(inputColumns[2]),
-          cudf::binary_operator::LESS_EQUAL,
-          kBoolType,
-          stream,
-          mr);
+          value, max, cudf::binary_operator::LESS_EQUAL, kBoolType, stream, mr);
     }
     return cudf::binary_operation(
         geResultColumn->view(),
@@ -1169,6 +1184,7 @@ class BetweenFunction : public CudfFunction {
 
  private:
   static constexpr cudf::data_type kBoolType{cudf::type_id::BOOL8};
+  const cudf::data_type operandType_;
   std::unique_ptr<cudf::scalar> minLiteral_;
   std::unique_ptr<cudf::scalar> maxLiteral_;
 };
