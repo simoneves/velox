@@ -2588,7 +2588,27 @@ VectorPtr importFromArrowImpl(
   arrowSchema.release = nullptr;
   arrowArray.release = nullptr;
 
-  return imported;
+  // Import paths that copy Arrow data instead of viewing it - timestamps,
+  // narrow decimals and misaligned long decimals - create no buffer view, so
+  // nothing above co-owns the Arrow structures. The same happens for any type
+  // when null_count is zero and the values are copied, because the nulls
+  // buffer is then absent. Bind the releasers to the returned vector so the
+  // release callbacks always run when the caller drops it, never earlier.
+  //
+  // This has to be a fresh control block. shared_ptr's aliasing constructor
+  // would share the original one, holding use_count() at two and defeating the
+  // uniqueness checks that copy-on-write paths such as ensureWritable use to
+  // decide whether a vector can be reused in place.
+  auto* rawImported = imported.get();
+  return VectorPtr(
+      rawImported,
+      [vector = std::move(imported),
+       schemaReleaser = std::move(schemaReleaser),
+       arrayReleaser = std::move(arrayReleaser)](BaseVector*) mutable {
+        // Drop the vector first. Buffer views that reference Arrow memory must
+        // be gone before the release callbacks free it.
+        vector.reset();
+      });
 }
 
 } // namespace
