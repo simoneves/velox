@@ -2264,7 +2264,8 @@ VectorPtr createShortDecimalVectorFromInt32Decimals(
     BufferPtr nulls,
     const int32_t* input,
     vector_size_t length,
-    int64_t nullCount) {
+    int64_t nullCount,
+    WrapInBufferViewFunc wrapInBufferView) {
   auto values = AlignedBuffer::allocate<int64_t>(length, pool);
   auto* rawValues = values->asMutable<int64_t>();
   if (nulls == nullptr) {
@@ -2280,8 +2281,31 @@ VectorPtr createShortDecimalVectorFromInt32Decimals(
     }
   }
 
-  return createFlatVector<TypeKind::BIGINT>(
+  // Widening the input to Velox's 64-bit short decimals forces a copy, so the
+  // vector ends up with no view over Arrow memory. Views are the only thing
+  // that keeps the ArrowSchema and ArrowArray alive under
+  // importFromArrowAsOwner, and a null_count of zero leaves no nulls view
+  // either. Hold a view over the input so the release callbacks wait for the
+  // vector instead of running as soon as the import returns.
+  auto arrowOwner = wrapInBufferView(input, length * sizeof(int32_t));
+
+  auto vector = createFlatVector<TypeKind::BIGINT>(
       pool, type, std::move(nulls), length, values, nullCount);
+
+  // Hand the view to a deleter on the returned pointer, which gives it a
+  // control block of its own. shared_ptr's aliasing constructor would instead
+  // share the vector's count, holding use_count() at two and defeating the
+  // uniqueness checks that copy-on-write paths such as ensureWritable use to
+  // decide whether a vector can be reused in place.
+  auto* rawVector = vector.get();
+  return VectorPtr(
+      rawVector,
+      [held = std::move(vector),
+       arrowOwner = std::move(arrowOwner)](BaseVector*) mutable {
+        // Drop the vector before the view, so that Arrow memory outlives
+        // anything that might still reference it.
+        held.reset();
+      });
 }
 
 VectorPtr createShortDecimalVectorFromLongDecimals(
@@ -2458,7 +2482,8 @@ VectorPtr importFromArrowImpl(
           nulls,
           static_cast<const int32_t*>(arrowArray.buffers[1]),
           arrowArray.length,
-          arrowArray.null_count);
+          arrowArray.null_count,
+          wrapInBufferView);
     }
     if (bitWidth == 64) {
       return createShortDecimalVector(

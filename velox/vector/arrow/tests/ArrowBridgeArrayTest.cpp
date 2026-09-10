@@ -2383,5 +2383,36 @@ TEST_F(ArrowBridgeArrayImportAsOwnerTest, releaseCalled) {
   EXPECT_TRUE(TestReleaseCalled::arrayReleaseCalled);
 }
 
+TEST_F(ArrowBridgeArrayImportAsOwnerTest, decimal32ReleaseDeferred) {
+  // A 32-bit decimal is widened into a new buffer, so the vector views no
+  // Arrow memory. With null_count at zero there is no nulls buffer to view
+  // either, leaving the view taken over the input as the only thing holding
+  // the Arrow structures alive.
+  const int32_t values[] = {100, 200, 300, 400};
+  const void* buffers[] = {nullptr, values};
+
+  ArrowSchema arrowSchema = makeArrowSchema("d:7,2,32");
+  ArrowArray arrowArray = makeArrowArray(buffers, 2, 4, /*nullCount=*/0);
+
+  TestReleaseCalled::schemaReleaseCalled = false;
+  TestReleaseCalled::arrayReleaseCalled = false;
+  arrowSchema.release = TestReleaseCalled::releaseSchema;
+  arrowArray.release = TestReleaseCalled::releaseArray;
+
+  {
+    auto vector = importFromArrowAsOwner(arrowSchema, arrowArray, pool_.get());
+    EXPECT_FALSE(TestReleaseCalled::schemaReleaseCalled);
+    EXPECT_FALSE(TestReleaseCalled::arrayReleaseCalled);
+
+    auto* flat = vector->asFlatVector<int64_t>();
+    ASSERT_NE(flat, nullptr);
+    EXPECT_EQ(flat->valueAt(0), 100);
+    EXPECT_EQ(flat->valueAt(3), 400);
+  }
+
+  EXPECT_TRUE(TestReleaseCalled::schemaReleaseCalled);
+  EXPECT_TRUE(TestReleaseCalled::arrayReleaseCalled);
+}
+
 } // namespace
 } // namespace facebook::velox::test
