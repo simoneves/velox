@@ -2383,5 +2383,37 @@ TEST_F(ArrowBridgeArrayImportAsOwnerTest, releaseCalled) {
   EXPECT_TRUE(TestReleaseCalled::arrayReleaseCalled);
 }
 
+TEST_F(ArrowBridgeArrayImportAsOwnerTest, releaseDeferredUntilVectorDestroyed) {
+  // Import paths that copy Arrow data create no buffer view over it. With no
+  // nulls buffer to view either, nothing but the imported vector itself holds
+  // the Arrow structures, so release must still wait for the vector to die.
+  const int32_t decimalValues[] = {100, 200, 300, 400};
+  const int64_t timestampValues[] = {1, 2, 3, 4};
+
+  auto assertReleaseDeferred = [&](const char* format, const void* values) {
+    const void* buffers[] = {nullptr, values};
+    ArrowSchema arrowSchema = makeArrowSchema(format);
+    ArrowArray arrowArray = makeArrowArray(buffers, 2, 4, /*nullCount=*/0);
+
+    TestReleaseCalled::schemaReleaseCalled = false;
+    TestReleaseCalled::arrayReleaseCalled = false;
+    arrowSchema.release = TestReleaseCalled::releaseSchema;
+    arrowArray.release = TestReleaseCalled::releaseArray;
+
+    {
+      auto vector =
+          importFromArrowAsOwner(arrowSchema, arrowArray, pool_.get());
+      EXPECT_FALSE(TestReleaseCalled::schemaReleaseCalled) << format;
+      EXPECT_FALSE(TestReleaseCalled::arrayReleaseCalled) << format;
+    }
+
+    EXPECT_TRUE(TestReleaseCalled::schemaReleaseCalled) << format;
+    EXPECT_TRUE(TestReleaseCalled::arrayReleaseCalled) << format;
+  };
+
+  assertReleaseDeferred("d:7,2,32", decimalValues);
+  assertReleaseDeferred("tsn:", timestampValues);
+}
+
 } // namespace
 } // namespace facebook::velox::test
