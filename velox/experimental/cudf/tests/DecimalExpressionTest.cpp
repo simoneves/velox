@@ -1114,6 +1114,69 @@ TEST_F(CudfDecimalTest, decimalDivideByZero) {
   assertCpuAndGpuDivideByZero(scalarColumnPlan);
 }
 
+// Overflow and division by zero can both happen in a single launch, since the
+// kernel evaluates every row before the host reads the shared status flag.
+// toDecimalBinaryOpStatus ranks division by zero above overflow, so the GPU
+// reports it for either row ordering. The CPU stops at the first failing row
+// instead, so it reports whichever failure sorts first. Both orderings are
+// covered because a single ordering cannot distinguish ranking by kind from
+// reporting whichever row failed first.
+TEST_F(CudfDecimalTest, decimalDivideOverflowAndDivideByZeroPrecedence) {
+  // Rescaling 9e37 by 1e6 overflows int128, and a zero divisor trips division
+  // by zero. Each row fails exactly one way, so the batch sets both bits.
+  const int128_t overflowLhs = 9 * DecimalUtil::kPowersOfTen[37];
+  const int128_t overflowRhs = DecimalUtil::kPowersOfTen[6];
+  const int128_t safeLhs = DecimalUtil::kPowersOfTen[6];
+  const int128_t zeroRhs = 0;
+
+  auto makePlan = [&](const std::vector<int128_t>& aValues,
+                      const std::vector<int128_t>& bValues) {
+    auto input = makeRowVector(
+        {"a", "b"},
+        {
+            makeFlatVector<int128_t>(aValues, DECIMAL(38, 6)),
+            makeFlatVector<int128_t>(bValues, DECIMAL(38, 6)),
+        });
+    std::vector<RowVectorPtr> vectors = {input};
+    return exec::test::PlanBuilder()
+        .values(vectors)
+        .project({"a / b AS div"})
+        .planNode();
+  };
+
+  auto assertThrows = [&](const core::PlanNodePtr& plan,
+                          const std::string& cpuMessage,
+                          const std::string& gpuMessage) {
+    unregisterCudf();
+    VELOX_ASSERT_USER_THROW(
+        facebook::velox::exec::test::AssertQueryBuilder(plan).copyResults(
+            pool()),
+        cpuMessage);
+    registerCudf();
+    VELOX_ASSERT_USER_THROW(
+        facebook::velox::exec::test::AssertQueryBuilder(plan).copyResults(
+            pool()),
+        gpuMessage);
+  };
+
+  // Overflowing row first: the CPU reports the overflow it reaches first, the
+  // GPU still reports division by zero. This is the divergence, and the only
+  // case where the two engines name different error kinds for the same batch.
+  // Only the shared "overflow" substring is pinned because the CPU wording
+  // varies by path.
+  assertThrows(
+      makePlan({overflowLhs, safeLhs}, {overflowRhs, zeroRhs}),
+      "overflow",
+      "Division by zero");
+
+  // Zero divisor first: both engines report division by zero, so the GPU
+  // result is unchanged by the reordering while the CPU result is not.
+  assertThrows(
+      makePlan({safeLhs, overflowLhs}, {zeroRhs, overflowRhs}),
+      "Division by zero",
+      "Division by zero");
+}
+
 // A conditional that excludes the zero-divisor rows must not fail the batch.
 // The GPU evaluator has no short-circuit: both branches are materialized over
 // every row before copy_if_else selects, so a fail-fast divide would abort over

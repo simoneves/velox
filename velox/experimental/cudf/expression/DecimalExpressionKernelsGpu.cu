@@ -91,9 +91,17 @@ __device__ inline bool isRowActive(
   return nullMask == nullptr || cudf::bit_is_set(nullMask, idx);
 }
 
-// Maps the raw device overflowFlag bits to a DecimalBinaryOpStatus. Division by
-// zero takes precedence over overflow to match Velox CPU, which validates the
-// divisor before the arithmetic.
+// Maps the raw device overflowFlag bits to a DecimalBinaryOpStatus. Both bits
+// can be set in one launch: the kernel evaluates every row before the host
+// reads the flag, so a batch holding an overflowing row and a zero-divisor row
+// reports both. Division by zero wins that tie, no matter which row index
+// failed.
+//
+// Within a row that matches Velox CPU, which validates the divisor first.
+// Across rows it deliberately differs: the CPU reports whichever row failed
+// first, which a single flag cannot reconstruct without the per-row status
+// column it exists to avoid. Ranking by kind keeps the error stable under row
+// reordering instead.
 DecimalBinaryOpStatus toDecimalBinaryOpStatus(int32_t overflowFlag) {
   if (overflowFlag & kDecimalDivByZeroBit) {
     return DecimalBinaryOpStatus::kDivisionByZero;
