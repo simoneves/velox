@@ -119,10 +119,13 @@ void ensureCudaContextForThread() {
       static_cast<int>(cudaSuccess),
       static_cast<int>(cudaFree(nullptr)),
       "Failed to initialize CUDA context on cuDF worker thread");
+  int currentDevice = -1;
   VELOX_CHECK_EQ(
       static_cast<int>(cudaSuccess),
-      static_cast<int>(cudaGetDevice(&cudfContextDevice)),
+      static_cast<int>(cudaGetDevice(&currentDevice)),
       "Failed to get current CUDA device ordinal");
+  VELOX_CHECK_EQ(currentDevice, cudfContextDevice,
+                 "cuDF worker initialized a different CUDA device");
 
   initialized = true;
 }
