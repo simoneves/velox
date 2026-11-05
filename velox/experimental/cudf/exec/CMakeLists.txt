@@ -64,7 +64,6 @@ target_link_libraries(
     velox_cudf_vector
     velox_exception
     velox_exec
-    velox_test_util
 )
 
 # The ucx-exchange library is only built when VELOX_ENABLE_UCX_EXCHANGE is on,
