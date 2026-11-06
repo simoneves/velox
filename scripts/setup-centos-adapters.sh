@@ -30,12 +30,16 @@
 # * VELOX_RUST_VERSION="1.85.1": Which Rust toolchain install_rust installs,
 #   will pick up RUST_VERSION from the env. RUSTUP_HOME and CARGO_HOME default
 #   to /usr/local/rustup and /usr/local/cargo.
+# * VELOX_PYARROW_VERSION="21.0.0": Which pyarrow install_pyarrow installs for
+#   the system Python, will pick up PYARROW_VERSION from the env. 21.0.0 is the
+#   last release for Python 3.9.
 
 set -efx -o pipefail
 
 VELOX_CUDA_VERSION=${CUDA_VERSION:-"12.9"}
 VELOX_UCX_VERSION=${UCX_VERSION:-"1.20.1"}
 VELOX_RUST_VERSION=${RUST_VERSION:-"1.85.1"}
+VELOX_PYARROW_VERSION=${PYARROW_VERSION:-"21.0.0"}
 SCRIPT_DIR=$(dirname "${BASH_SOURCE[0]}")
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR"/setup-centos9.sh
@@ -149,6 +153,13 @@ function install_rust {
   # Builds that run as another user still need to write the registry cache.
   chmod -R a+rwX "${RUSTUP_HOME}" "${CARGO_HOME}"
   "${CARGO_HOME}"/bin/cargo --version
+}
+
+function install_pyarrow {
+  # Installs pyarrow for the system Python, for tests and tools that write
+  # Parquet and Arrow fixtures.
+  python3 -m pip install --no-cache-dir "pyarrow==${VELOX_PYARROW_VERSION}"
+  python3 -c "import pyarrow; print('pyarrow', pyarrow.__version__)"
 }
 
 function install_adapters_deps_from_dnf {

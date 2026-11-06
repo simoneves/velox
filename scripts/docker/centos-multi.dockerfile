@@ -200,6 +200,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 ENV PATH=/usr/local/cargo/bin:${PATH}
 RUN bash /setup-centos-adapters.sh install_rust
 
+RUN bash /setup-centos-adapters.sh install_pyarrow
+
 ARG CENTOS_TZDATA_VERSION
 # tzdata-java is pulled in by the Java install above. Pin it to match
 # the OS tzdata pinned in centos9 so the JDK and Velox C++ see the
