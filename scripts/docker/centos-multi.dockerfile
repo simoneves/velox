@@ -195,6 +195,11 @@ RUN bash /setup-centos-adapters.sh install_cuda && \
 RUN bash /setup-centos-adapters.sh install_adapters_deps_from_dnf && \
       dnf clean all
 
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:${PATH}
+RUN bash /setup-centos-adapters.sh install_rust
+
 ARG CENTOS_TZDATA_VERSION
 # tzdata-java is pulled in by the Java install above. Pin it to match
 # the OS tzdata pinned in centos9 so the JDK and Velox C++ see the

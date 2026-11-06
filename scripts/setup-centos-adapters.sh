@@ -27,11 +27,15 @@
 #   CUDA_VERSION from the env
 # * VELOX_UCX_VERSION="1.20.1": Which version of ucx to install, will pick up
 #   UCX_VERSION from the env
+# * VELOX_RUST_VERSION="1.85.1": Which Rust toolchain install_rust installs,
+#   will pick up RUST_VERSION from the env. RUSTUP_HOME and CARGO_HOME default
+#   to /usr/local/rustup and /usr/local/cargo.
 
 set -efx -o pipefail
 
 VELOX_CUDA_VERSION=${CUDA_VERSION:-"12.9"}
 VELOX_UCX_VERSION=${UCX_VERSION:-"1.20.1"}
+VELOX_RUST_VERSION=${RUST_VERSION:-"1.85.1"}
 SCRIPT_DIR=$(dirname "${BASH_SOURCE[0]}")
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR"/setup-centos9.sh
@@ -130,6 +134,21 @@ function install_cuda_runtime {
     libcufile-"$dashed" \
     libnvjitlink-"$dashed" \
     numactl-libs
+}
+
+function install_rust {
+  # Installs a pinned Rust toolchain with rustup into shared locations, so
+  # that every user of the image gets the same toolchain. Put
+  # ${CARGO_HOME}/bin on the PATH to use it.
+  local version="${1:-$VELOX_RUST_VERSION}"
+  export RUSTUP_HOME="${RUSTUP_HOME:-/usr/local/rustup}"
+  export CARGO_HOME="${CARGO_HOME:-/usr/local/cargo}"
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y --no-modify-path --profile minimal \
+      --default-toolchain "${version}" --component rustfmt --component clippy
+  # Builds that run as another user still need to write the registry cache.
+  chmod -R a+rwX "${RUSTUP_HOME}" "${CARGO_HOME}"
+  "${CARGO_HOME}"/bin/cargo --version
 }
 
 function install_adapters_deps_from_dnf {
