@@ -195,6 +195,12 @@ option(VELOX_SIMDJSON_SKIPUTF8VALIDATION "Skip simdjson utf8 validation in JSON 
 option(VELOX_ENABLE_FAISS "Build faiss vector search support" OFF)
 option(VELOX_ENABLE_TORCHWAVE "Build TorchWave experimental subsystem." OFF)
 option(VELOX_ENABLE_CXL "Build CXL experimental memory subsystem (Linux only)." OFF)
+set(
+  VELOX_CUDF_EXTENSIONS
+  ""
+  CACHE STRING
+  "Out-of-tree projects to build against Velox's cuDF integration, as <name>=<location>[|<subdir>] entries; see CMake/CudfExtensions.cmake."
+)
 
 # Explicitly force compilers to generate colored output. Compilers usually do
 # this by default if they detect the output is a terminal, but this assumption
@@ -924,3 +930,6 @@ if(VELOX_ENABLE_NIMBLE)
 endif()
 
 add_subdirectory(velox)
+
+include(CudfExtensions)
+velox_add_cudf_extensions()
