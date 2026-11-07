@@ -201,6 +201,7 @@ set(
   CACHE STRING
   "Out-of-tree projects to build against Velox's cuDF integration, as <name>=<location>[|<subdir>] entries; see CMake/CudfExtensions.cmake."
 )
+option(VELOX_ENABLE_CUGEO "Build cuGeo's Velox adapter on Velox's cuDF integration." OFF)
 
 # Explicitly force compilers to generate colored output. Compilers usually do
 # this by default if they detect the output is a terminal, but this assumption
@@ -933,3 +934,9 @@ add_subdirectory(velox)
 
 include(CudfExtensions)
 velox_add_cudf_extensions()
+
+# cuGeo's adapter links Velox's targets, so it is added after all of them.
+if(VELOX_ENABLE_CUGEO)
+  velox_set_source(cugeo)
+  velox_resolve_dependency(cugeo)
+endif()
