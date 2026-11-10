@@ -16,8 +16,8 @@ include_guard(GLOBAL)
 
 # cuGeo's Velox adapter, built against Velox's cuDF integration.
 #
-# cuGeo commit 252f4fb77 from 2026-11-10 (branch simoneves/cugeo-presto-plugin)
-set(VELOX_cugeo_COMMIT 252f4fb775a1b7a87d94c9b408c96f2c65bf7cdb)
+# cuGeo commit eb0316d79 from 2026-11-10 (branch simoneves/cugeo-presto-plugin)
+set(VELOX_cugeo_COMMIT eb0316d79bbb44521275bd8330ca3b45d3e82399)
 # cuGeo is private on GitLab for now, so it is cloned over SSH with the caller's
 # SSH agent, on NVIDIA's network. When cuGeo is public on GitHub, replace this
 # URL with its https:// clone URL; nothing else here depends on SSH.
