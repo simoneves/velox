@@ -38,7 +38,11 @@
 #include <cudf/detail/nvtx/ranges.hpp>
 #include <cudf/utilities/memory_resource.hpp>
 
+#include <rmm/mr/per_device_resource.hpp>
+
 #include <cuda.h>
+
+#include <exception>
 
 static const std::string kCudfAdapterName = "cuDF";
 
@@ -336,6 +340,57 @@ struct CudfDriverAdapter {
 
 static bool isCudfRegistered = false;
 
+namespace {
+using DeviceResource = cuda::mr::any_resource<cuda::mr::device_accessible>;
+struct InstalledResource {
+  int device;
+  std::optional<DeviceResource> previous;
+};
+std::optional<InstalledResource> installedResource;
+
+// Releases Velox's resource handles. The any_resource copies go before the
+// adaptors they were copied from, so the wrapped upstream resources are
+// released here.
+void releaseCudfResources() {
+  output_mr_.reset();
+  mr_.reset();
+  outputStatsMr_.reset();
+  statsMr_.reset();
+}
+
+// Reinstalls the resource registerCudf() replaced on the device it installed
+// on, then releases Velox's resource handles.
+void restoreCudfResources() {
+  if (!installedResource) {
+    releaseCudfResources();
+    return;
+  }
+  const auto callerDevice = rmm::get_current_cuda_device();
+  RMM_CUDA_TRY(cudaSetDevice(installedResource->device));
+  try {
+    if (installedResource->previous) {
+      {
+        auto current = rmm::mr::set_per_device_resource(
+            rmm::cuda_device_id{installedResource->device},
+            *installedResource->previous);
+        releaseCudfResources();
+      }
+      installedResource->previous.reset();
+    }
+  } catch (...) {
+    const auto primary = std::current_exception();
+    const auto status = cudaSetDevice(callerDevice.value());
+    if (status != cudaSuccess) {
+      LOG(ERROR) << "CUDA device restoration failed: "
+                 << cudaGetErrorString(status);
+    }
+    std::rethrow_exception(primary);
+  }
+  RMM_CUDA_TRY(cudaSetDevice(callerDevice.value()));
+  installedResource.reset();
+}
+} // namespace
+
 bool cudfIsRegistered() {
   return isCudfRegistered;
 }
@@ -344,6 +399,10 @@ void registerCudf() {
   if (cudfIsRegistered()) {
     return;
   }
+
+  VELOX_CHECK(
+      !installedResource,
+      "Pending cuDF resource cleanup requires unregisterCudf");
 
   // Register operator adapters
   registerAllOperatorAdapters();
@@ -374,43 +433,59 @@ void registerCudf() {
   // cudfAllocatedBytes() can report live device memory.
   statsMr_.emplace(std::move(base));
   mr_ = statsMr_.value();
-  cudf::set_current_device_resource(mr_.value());
+  installedResource.emplace(
+      InstalledResource{
+          contextDevice,
+          rmm::mr::set_per_device_resource(
+              rmm::cuda_device_id{contextDevice}, mr_.value())});
+  try {
+    const auto& outputMrMode = CudfConfig::getInstance().outputMemoryResource;
+    if (!outputMrMode.empty() && outputMrMode != mrMode) {
+      outputStatsMr_.emplace(
+          cudf_velox::createMemoryResource(
+              outputMrMode, CudfConfig::getInstance().memoryPercent));
+      output_mr_ = outputStatsMr_.value();
+    } else {
+      output_mr_ = mr_;
+    }
 
-  const auto& outputMrMode = CudfConfig::getInstance().outputMemoryResource;
-  if (!outputMrMode.empty() && outputMrMode != mrMode) {
-    outputStatsMr_.emplace(
-        cudf_velox::createMemoryResource(
-            outputMrMode, CudfConfig::getInstance().memoryPercent));
-    output_mr_ = outputStatsMr_.value();
-  } else {
-    output_mr_ = mr_;
-  }
+    exec::Operator::registerOperator(
+        std::make_unique<CudfHashJoinBridgeTranslator>());
+    exec::Operator::registerOperator(
+        std::make_unique<CudfNestedLoopJoinBridgeTranslator>());
+    CudfDriverAdapter cda;
+    exec::DriverAdapter cudfAdapter{kCudfAdapterName, {}, cda};
+    exec::DriverFactory::registerAdapter(cudfAdapter);
 
-  exec::Operator::registerOperator(
-      std::make_unique<CudfHashJoinBridgeTranslator>());
-  exec::Operator::registerOperator(
-      std::make_unique<CudfNestedLoopJoinBridgeTranslator>());
-  CudfDriverAdapter cda;
-  exec::DriverAdapter cudfAdapter{kCudfAdapterName, {}, cda};
-  exec::DriverFactory::registerAdapter(cudfAdapter);
+    if (CudfConfig::getInstance().astExpressionEnabled) {
+      registerAstEvaluator(CudfConfig::getInstance().astExpressionPriority);
+    }
 
-  if (CudfConfig::getInstance().astExpressionEnabled) {
-    registerAstEvaluator(CudfConfig::getInstance().astExpressionPriority);
-  }
-
-  if (CudfConfig::getInstance().jitExpressionEnabled) {
-    registerJitEvaluator(CudfConfig::getInstance().jitExpressionPriority);
-  }
+    if (CudfConfig::getInstance().jitExpressionEnabled) {
+      registerJitEvaluator(CudfConfig::getInstance().jitExpressionPriority);
+    }
 
 #ifdef VELOX_ENABLE_UCX_EXCHANGE
-  // Registered last, after the memory resources and driver adapter it relies
-  // on, so a registerCudf() that fails part way leaves no kUcx behind.
-  if (CudfConfig::getInstance().exchange) {
-    ucx_exchange::registerUcxTransports();
-  }
+    // Registered last, after the memory resources and driver adapter it relies
+    // on, so a registerCudf() that fails part way leaves no kUcx behind.
+    if (CudfConfig::getInstance().exchange) {
+      ucx_exchange::registerUcxTransports();
+    }
 #endif
 
-  isCudfRegistered = true;
+    isCudfRegistered = true;
+  } catch (...) {
+    const auto primary = std::current_exception();
+    try {
+      unregisterCudf();
+    } catch (const std::exception& cleanup) {
+      LOG(ERROR) << "cuDF registration resource rollback failed: "
+                 << cleanup.what();
+    } catch (...) {
+      LOG(ERROR) << "cuDF registration resource rollback failed";
+    }
+    std::rethrow_exception(primary);
+  }
 }
 
 void unregisterCudf() {
@@ -419,12 +494,7 @@ void unregisterCudf() {
   // CudfConfig::exchange was set when registerCudf() ran.
   ucx_exchange::unregisterUcxTransports();
 #endif
-  // Reset the any_resource copies before the adaptors they were copied from,
-  // so that the wrapped upstream resources are released here.
-  output_mr_.reset();
-  mr_.reset();
-  outputStatsMr_.reset();
-  statsMr_.reset();
+  restoreCudfResources();
   // Undo registerCudf()'s operator adapter registration.
   OperatorAdapterRegistry::getInstance().clear();
   exec::DriverFactory::adapters.erase(
