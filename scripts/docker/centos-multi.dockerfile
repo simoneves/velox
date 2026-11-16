@@ -239,7 +239,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility"
 
 # Install test dependencies
-RUN uv pip install --system https://github.com/googleapis/storage-testbench/archive/refs/tags/v0.36.0.tar.gz
+RUN uv pip install --system https://github.com/googleapis/storage-testbench/archive/refs/tags/v0.67.0.tar.gz
 
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 RUN . /root/.nvm/nvm.sh && nvm install 22
