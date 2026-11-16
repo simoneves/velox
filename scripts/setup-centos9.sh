@@ -58,7 +58,9 @@ function install_build_prerequisites {
   fi
   dnf_install autoconf automake ccache clang compiler-rt \
     gcc-toolset-12 gcc-toolset-14 git libtool libunwind-devel \
-    llvm ninja-build python3-pip python3-devel wget which
+    llvm ninja-build python3.12 python3.12-devel python3.12-pip wget which
+  install_python_312_default
+  install_libclang_21
 
   install_uv
   uv_install --force cmake@4.3.2
@@ -66,6 +68,44 @@ function install_build_prerequisites {
   if [[ ${USE_CLANG} != "false" ]]; then
     install_clang15
   fi
+}
+
+# Make Python 3.12 the build's python3, python, pip3 and pip. CentOS Stream 9's
+# own tools, dnf included, run on the system Python 3.9 by its full name
+# (#!/usr/bin/python3.9), which stays installed.
+function install_python_312_default {
+  ln -sf /usr/bin/python3.12 /usr/bin/python3
+  ln -sf /usr/bin/python3.12 /usr/bin/python
+  ln -sf /usr/bin/pip3.12 /usr/bin/pip3
+  ln -sf /usr/bin/pip3.12 /usr/bin/pip
+  python3 --version
+}
+
+# Unpack libclang 21 and its resource headers under ${LIBCLANG_21_DIR}, beside
+# the system's newer clang, for tools that load libclang and read its API by
+# number, such as cuGeo's ABI generator, which accepts libclang 21 and older.
+# Point LIBCLANG_PATH at ${LIBCLANG_21_DIR}/usr/lib64/libclang.so.21.1 and pass
+# -resource-dir=${LIBCLANG_21_DIR}/usr/lib/clang/21 to its parses.
+LIBCLANG_21_VERSION="21.1.8-2.el9"
+LIBCLANG_21_DIR="/opt/libclang-21"
+function install_libclang_21 {
+  dnf_install cpio patchelf
+  local download
+  download=$(mktemp -d)
+  (
+    cd "${download}" &&
+      dnf download -y "clang-libs-${LIBCLANG_21_VERSION}.x86_64" "llvm-libs-${LIBCLANG_21_VERSION}.x86_64"
+  )
+  mkdir -p "${LIBCLANG_21_DIR}"
+  # This script runs with globbing off (set -f), so the packages are named.
+  for package in clang-libs llvm-libs; do
+    (cd "${LIBCLANG_21_DIR}" &&
+      rpm2cpio "${download}/${package}-${LIBCLANG_21_VERSION}.x86_64.rpm" | cpio -idm --quiet)
+  done
+  rm -rf "${download}"
+  # Load the unpacked LLVM libraries beside libclang, not the system's.
+  patchelf --set-rpath '$ORIGIN' "${LIBCLANG_21_DIR}"/usr/lib64/libclang.so.21.1
+  test -f "${LIBCLANG_21_DIR}/usr/lib/clang/21/include/stddef.h"
 }
 
 # Install dependencies from the package managers.
