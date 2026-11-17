@@ -53,12 +53,13 @@ set(
 )
 velox_resolve_dependency_url(kvikio)
 
-# cudf commit c9086e0 from 2026-10-15 (main branch)
+# cudf commit b3acd43 on simoneves/cudf-c9086e0-fixes: commit c9086e0 from
+# 2026-10-15 (main branch) with fixes
 set(VELOX_cudf_VERSION 26.12 CACHE STRING "cudf version")
-set(VELOX_cudf_COMMIT c9086e0afbf0cb11194a12bb2233b80139eabd09)
+set(VELOX_cudf_COMMIT b3acd43cd08cc379ccfc02f1990acb95321a64d7)
 set(
   VELOX_cudf_BUILD_SHA256_CHECKSUM
-  65c4df018b62ced84ebd74235f70abd053fbcae342e2eb720bc0571023dba72f
+  1202099ae284b8973807d251708828e3ebb3e4dc796bddbc94aaa88c4e4f2c2d
 )
 set(VELOX_cudf_SOURCE_URL "https://github.com/rapidsai/cudf/archive/${VELOX_cudf_COMMIT}.tar.gz")
 velox_resolve_dependency_url(cudf)
