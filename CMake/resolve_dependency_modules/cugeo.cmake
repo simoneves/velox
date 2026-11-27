@@ -16,8 +16,8 @@ include_guard(GLOBAL)
 
 # cuGeo's Velox adapter, built against Velox's cuDF integration.
 #
-# cuGeo commit 67cce4a2c from 2026-11-25 (branch simoneves/cugeo-presto-adapter-scope)
-set(VELOX_cugeo_COMMIT 67cce4a2cca327214f5bf6dbd031241394a6c91e)
+# cuGeo commit 1ff63c45e from 2026-11-27 (branch simoneves/cugeo-presto-adapter-scope)
+set(VELOX_cugeo_COMMIT 1ff63c45e1238e5a7d981618374dd52f5c825489)
 # cuGeo is private on GitLab for now, so it is cloned over SSH with the caller's
 # SSH agent, on NVIDIA's network. When cuGeo is public on GitHub, replace this
 # URL with its https:// clone URL; nothing else here depends on SSH.
@@ -27,7 +27,7 @@ velox_set_with_default(VELOX_cugeo_SOURCE_URL VELOX_cugeo_URL ${VELOX_cugeo_SOUR
 # Velox needs only this part of the cuGeo repository. The clone is sparse and
 # partial, so the other parts are neither checked out nor downloaded.
 set(VELOX_cugeo_SPARSE_PATH cugeo-geometry)
-set(VELOX_cugeo_SOURCE_SUBDIR cugeo-geometry/backends/cugeo-velox)
+set(VELOX_cugeo_SOURCE_SUBDIR cugeo-geometry/backends/velox)
 
 # Runs git in the cuGeo checkout and fails the configure on any error.
 function(velox_cugeo_git source_dir)
